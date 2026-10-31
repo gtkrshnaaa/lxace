@@ -49,3 +49,14 @@ TEST_CASE(ring_buffer_tail_cropping) {
     ASSERT_EQ(more_than_size.size(), 4);
     ASSERT_EQ(more_than_size[0], "line 1");
 }
+
+TEST_CASE(ring_buffer_versioning) {
+    RingBuffer<int> rb(10);
+    ASSERT_EQ(rb.version(), 0);
+
+    rb.push(100);
+    ASSERT_EQ(rb.version(), 1);
+
+    rb.push(200);
+    ASSERT_EQ(rb.version(), 2);
+}

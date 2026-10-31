@@ -12,4 +12,6 @@ cmake -DCMAKE_BUILD_TYPE=Debug "${SCRIPT_DIR}"
 make -j"$(nproc)" lxace_tests
 
 echo "Running tests..."
+sync
+chmod +x "${BUILD_DIR}/lxace_tests"
 "${BUILD_DIR}/lxace_tests"

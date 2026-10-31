@@ -15,8 +15,16 @@ SseStreamManager::~SseStreamManager() {
 }
 
 void SseStreamManager::add_client(int client_fd) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    client_fds_.push_back(client_fd);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (client_fds_.size() >= MAX_CLIENTS) {
+            // Close oldest client to prevent file descriptor exhaustion
+            int oldest_fd = client_fds_.front();
+            close(oldest_fd);
+            client_fds_.erase(client_fds_.begin());
+        }
+        client_fds_.push_back(client_fd);
+    }
 
     // Initial SSE header
     std::string initial_header =

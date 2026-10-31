@@ -3,12 +3,32 @@
 #include <unistd.h>
 #include <termios.h>
 #include <poll.h>
+#include <csignal>
+#include <atomic>
 #include <iostream>
 
 namespace lxace::cli {
 
 static struct termios orig_termios;
 static bool raw_mode_enabled = false;
+static std::atomic<bool> g_window_resized{false};
+
+static void sigwinch_handler(int) {
+    g_window_resized.store(true, std::memory_order_relaxed);
+}
+
+void Terminal::install_signal_handlers() {
+    struct sigaction sa{};
+    sa.sa_handler = sigwinch_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGWINCH, &sa, nullptr);
+    std::atexit(Terminal::disable_raw_mode);
+}
+
+bool Terminal::check_and_reset_resized() {
+    return g_window_resized.exchange(false, std::memory_order_relaxed);
+}
 
 TerminalSize Terminal::get_size() {
     TerminalSize size;
@@ -51,6 +71,18 @@ bool Terminal::is_stdin_ready(int timeout_ms) {
     pfd.fd = STDIN_FILENO;
     pfd.events = POLLIN;
     return poll(&pfd, 1, timeout_ms) > 0;
+}
+
+int Terminal::read_key_timeout(int timeout_ms) {
+    if (!is_stdin_ready(timeout_ms)) {
+        return -1;
+    }
+    char c = 0;
+    ssize_t n = read(STDIN_FILENO, &c, 1);
+    if (n == 1) {
+        return static_cast<unsigned char>(c);
+    }
+    return -1;
 }
 
 char Terminal::read_char() {

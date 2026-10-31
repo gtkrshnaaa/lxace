@@ -18,8 +18,11 @@ public:
     static void enable_raw_mode();
     static void disable_raw_mode();
     static bool is_stdin_ready(int timeout_ms = 100);
+    static int read_key_timeout(int timeout_ms = 100);
     static char read_char();
     static std::string read_line();
+    static void install_signal_handlers();
+    static bool check_and_reset_resized();
 };
 
 } // namespace lxace::cli

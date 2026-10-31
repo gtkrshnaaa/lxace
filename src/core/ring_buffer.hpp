@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <atomic>
 #include <cstddef>
 #include <algorithm>
 
@@ -15,25 +16,35 @@ public:
         : capacity_(capacity > 0 ? capacity : 1) {}
 
     void push(const T& item) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (buffer_.size() < capacity_) {
-            buffer_.push_back(item);
-        } else {
-            buffer_[head_] = item;
-            head_ = (head_ + 1) % capacity_;
-            is_full_ = true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (buffer_.size() < capacity_) {
+                buffer_.push_back(item);
+            } else {
+                buffer_[head_] = item;
+                head_ = (head_ + 1) % capacity_;
+                is_full_ = true;
+            }
         }
+        version_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void push(T&& item) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (buffer_.size() < capacity_) {
-            buffer_.push_back(std::move(item));
-        } else {
-            buffer_[head_] = std::move(item);
-            head_ = (head_ + 1) % capacity_;
-            is_full_ = true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (buffer_.size() < capacity_) {
+                buffer_.push_back(std::move(item));
+            } else {
+                buffer_[head_] = std::move(item);
+                head_ = (head_ + 1) % capacity_;
+                is_full_ = true;
+            }
         }
+        version_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    [[nodiscard]] uint64_t version() const {
+        return version_.load(std::memory_order_relaxed);
     }
 
     [[nodiscard]] std::vector<T> snapshot() const {
@@ -93,6 +104,7 @@ private:
     size_t head_{0};
     bool is_full_{false};
     mutable std::mutex mutex_;
+    std::atomic<uint64_t> version_{0};
 };
 
 } // namespace lxace::core

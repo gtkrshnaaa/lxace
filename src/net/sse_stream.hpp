@@ -23,6 +23,7 @@ public:
     [[nodiscard]] size_t client_count() const;
 
 private:
+    static constexpr size_t MAX_CLIENTS = 128;
     mutable std::mutex mutex_;
     std::vector<int> client_fds_;
 };

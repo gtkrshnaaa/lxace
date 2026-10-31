@@ -26,12 +26,20 @@ public:
     [[nodiscard]] bool has_active_tasks() const;
 
 private:
+    struct WorkerHandle {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> done{std::make_shared<std::atomic<bool>>(false)};
+    };
+
+    void reap_finished_workers_locked();
+
     std::shared_ptr<core::EventBus> event_bus_;
     mutable std::mutex mutex_;
     std::vector<Task> tasks_;
     std::atomic<bool> cancel_flag_{false};
-    std::vector<std::thread> worker_threads_;
+    std::vector<std::unique_ptr<WorkerHandle>> workers_;
     size_t next_task_id_{1};
+    static constexpr size_t MAX_TASK_HISTORY = 100;
 };
 
 } // namespace lxace::agent

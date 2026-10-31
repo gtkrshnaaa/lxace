@@ -71,15 +71,56 @@ void HttpServer::server_loop() {
 }
 
 void HttpServer::handle_client(int client_fd) {
-    char buffer[8192];
-    ssize_t bytes_read = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
+    struct timeval tv{};
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+    std::string raw_buffer;
+    char chunk[4096];
+    constexpr size_t MAX_REQUEST_SIZE = 10 * 1024 * 1024; // 10MB
+
+    while (raw_buffer.size() < MAX_REQUEST_SIZE) {
+        ssize_t bytes_read = recv(client_fd, chunk, sizeof(chunk), 0);
+        if (bytes_read > 0) {
+            raw_buffer.append(chunk, static_cast<size_t>(bytes_read));
+            // Check if we have complete headers
+            auto header_end = raw_buffer.find("\r\n\r\n");
+            if (header_end != std::string::npos) {
+                // Check content length
+                auto cl_pos = raw_buffer.find("Content-Length:");
+                if (cl_pos == std::string::npos) {
+                    cl_pos = raw_buffer.find("content-length:");
+                }
+                if (cl_pos != std::string::npos && cl_pos < header_end) {
+                    size_t val_start = cl_pos + 15;
+                    size_t val_end = raw_buffer.find("\r\n", val_start);
+                    if (val_end != std::string::npos) {
+                        try {
+                            size_t content_len = std::stoul(raw_buffer.substr(val_start, val_end - val_start));
+                            if (raw_buffer.size() >= header_end + 4 + content_len) {
+                                break;
+                            }
+                        } catch (...) {
+                            break;
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    if (raw_buffer.empty()) {
         close(client_fd);
         return;
     }
-    buffer[bytes_read] = '\0';
 
-    auto req = HttpParser::parse(std::string_view(buffer, static_cast<size_t>(bytes_read)));
+    auto req = HttpParser::parse(raw_buffer);
     if (!req) {
         HttpResponse bad_req;
         bad_req.status_code = 400;

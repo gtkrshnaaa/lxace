@@ -17,16 +17,23 @@ void ViewSettings::render(const core::Engine&) {
 }
 
 ViewState ViewSettings::handle_input(core::Engine&) {
-    std::string input = Terminal::read_line();
-    if (input.empty()) return ViewState::Settings;
+    Terminal::enable_raw_mode();
+    int key = Terminal::read_key_timeout(5000);
+    Terminal::disable_raw_mode();
 
-    switch (input[0]) {
+    if (key == -1) return ViewState::Settings;
+
+    switch (key) {
         case '1': return ViewState::SettingsBaseUrl;
         case '2': return ViewState::SettingsApiKey;
         case '3': return ViewState::SettingsModel;
         case '4': return ViewState::SettingsMaxTokens;
         case '5': return ViewState::SettingsTemperature;
-        case '6': return ViewState::Home;
+        case '6':
+        case 'q':
+        case 'Q':
+        case 27: // ESC
+            return ViewState::Home;
         default: return ViewState::Settings;
     }
 }
@@ -76,10 +83,13 @@ void ViewSettings::render_model(const core::Engine& engine) {
 }
 
 ViewState ViewSettings::handle_model(core::Engine& engine) {
-    std::string input = Terminal::read_line();
-    if (input.empty()) return ViewState::Settings;
+    Terminal::enable_raw_mode();
+    int key = Terminal::read_key_timeout(5000);
+    Terminal::disable_raw_mode();
 
-    switch (input[0]) {
+    if (key == -1) return ViewState::SettingsModel;
+
+    switch (key) {
         case '1':
             engine.config()->set_model("claude-sonnet-4");
             return ViewState::Settings;
@@ -98,6 +108,9 @@ ViewState ViewSettings::handle_model(core::Engine& engine) {
             return ViewState::Settings;
         }
         case '5':
+        case 'q':
+        case 'Q':
+        case 27:
             return ViewState::Settings;
         default:
             return ViewState::SettingsModel;

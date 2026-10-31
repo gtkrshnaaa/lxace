@@ -28,6 +28,7 @@ public:
     static bool create_directories(const std::filesystem::path& path);
     static std::optional<uint32_t> get_permissions(const std::filesystem::path& path);
     static bool set_permissions(const std::filesystem::path& path, uint32_t mode);
+    static std::optional<std::filesystem::path> resolve_safe_path(const std::filesystem::path& base_dir, const std::filesystem::path& target);
 };
 
 } // namespace lxace::sys

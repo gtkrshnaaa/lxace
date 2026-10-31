@@ -32,3 +32,22 @@ TEST_CASE(fs_directory_listing) {
     FsEngine::remove_path(test_dir);
     ASSERT_FALSE(FsEngine::exists(test_dir));
 }
+
+TEST_CASE(fs_safe_path_traversal_protection) {
+    std::filesystem::path project_root = "/tmp/lxace_project";
+    FsEngine::create_directories(project_root / "subdir");
+
+    // Allowed relative path
+    auto safe1 = FsEngine::resolve_safe_path(project_root, "subdir/file.txt");
+    ASSERT_TRUE(safe1.has_value());
+
+    // Disallowed path traversal escaping project root
+    auto unsafe1 = FsEngine::resolve_safe_path(project_root, "../../etc/passwd");
+    ASSERT_FALSE(unsafe1.has_value());
+
+    // Disallowed absolute path outside project root
+    auto unsafe2 = FsEngine::resolve_safe_path(project_root, "/etc/shadow");
+    ASSERT_FALSE(unsafe2.has_value());
+
+    FsEngine::remove_path(project_root);
+}

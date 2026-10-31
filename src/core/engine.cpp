@@ -156,6 +156,76 @@ void Engine::register_api_routes() {
         res["duration_ms"] = result.duration_ms;
         return net::HttpResponse::json(200, json::JsonValue(res).serialize());
     });
+
+    // GET /api/fs/list
+    http_router_->add_route(net::HttpMethod::Get, "/api/fs/list", [this](const net::HttpRequest& req) {
+        std::string rel_path = "";
+        auto it = req.query_params.find("path");
+        if (it != req.query_params.end()) {
+            rel_path = it->second;
+        }
+        auto safe_path = sys::FsEngine::resolve_safe_path(project_dir_, rel_path);
+        if (!safe_path) {
+            return net::HttpResponse::json(403, "{\"error\": \"Access denied: path outside project directory\"}");
+        }
+
+        auto entries = sys::FsEngine::list_directory(*safe_path, false);
+        json::JsonArray arr;
+        for (const auto& de : entries) {
+            json::JsonObject item;
+            item["name"] = de.name;
+            item["path"] = de.path;
+            item["is_directory"] = de.is_directory;
+            item["size"] = static_cast<double>(de.size);
+            item["permissions"] = static_cast<int>(de.permissions);
+            arr.push_back(json::JsonValue(item));
+        }
+        return net::HttpResponse::json(200, json::JsonValue(arr).serialize());
+    });
+
+    // POST /api/fs/read
+    http_router_->add_route(net::HttpMethod::Post, "/api/fs/read", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed || !parsed->contains("path")) {
+            return net::HttpResponse::json(400, "{\"error\": \"Missing path field\"}");
+        }
+        std::string p = (*parsed)["path"].as_string();
+        auto safe_path = sys::FsEngine::resolve_safe_path(project_dir_, p);
+        if (!safe_path) {
+            return net::HttpResponse::json(403, "{\"error\": \"Access denied: path outside project directory\"}");
+        }
+
+        auto content = sys::FsEngine::read_file(*safe_path);
+        if (!content) {
+            return net::HttpResponse::json(404, "{\"error\": \"File not found or unreadable\"}");
+        }
+        json::JsonObject res;
+        res["path"] = safe_path->string();
+        res["content"] = *content;
+        return net::HttpResponse::json(200, json::JsonValue(res).serialize());
+    });
+
+    // POST /api/fs/write
+    http_router_->add_route(net::HttpMethod::Post, "/api/fs/write", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed || !parsed->contains("path") || !parsed->contains("content")) {
+            return net::HttpResponse::json(400, "{\"error\": \"Missing path or content field\"}");
+        }
+        std::string p = (*parsed)["path"].as_string();
+        std::string content = (*parsed)["content"].as_string();
+        bool append = parsed->contains("append") && (*parsed)["append"].as_bool();
+
+        auto safe_path = sys::FsEngine::resolve_safe_path(project_dir_, p);
+        if (!safe_path) {
+            return net::HttpResponse::json(403, "{\"error\": \"Access denied: path outside project directory\"}");
+        }
+
+        bool ok = sys::FsEngine::write_file(*safe_path, content, append);
+        if (!ok) {
+            return net::HttpResponse::json(500, "{\"error\": \"Failed to write file\"}");
+        }
+        return net::HttpResponse::json(200, "{\"status\": \"written\"}");
+    });
 }
 
 } // namespace lxace::core

@@ -103,4 +103,25 @@ bool FsEngine::set_permissions(const std::filesystem::path& path, uint32_t mode)
     return chmod(path.c_str(), static_cast<mode_t>(mode)) == 0;
 }
 
+std::optional<std::filesystem::path> FsEngine::resolve_safe_path(const std::filesystem::path& base_dir, const std::filesystem::path& target) {
+    std::error_code ec;
+    auto abs_base = std::filesystem::weakly_canonical(base_dir, ec);
+    if (ec) return std::nullopt;
+
+    std::filesystem::path combined = target.is_absolute() ? target : (abs_base / target);
+    auto normalized = std::filesystem::weakly_canonical(combined, ec);
+    if (ec) return std::nullopt;
+
+    std::string base_str = abs_base.string();
+    std::string norm_str = normalized.string();
+
+    // Ensure normalized path starts with base_str
+    if (norm_str.rfind(base_str, 0) == 0) {
+        if (norm_str.length() == base_str.length() || norm_str[base_str.length()] == '/' || base_str == "/") {
+            return normalized;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace lxace::sys

@@ -1,5 +1,6 @@
 #include "core/engine.hpp"
 #include "cli/cli_app.hpp"
+#include "cli/terminal.hpp"
 #include <iostream>
 #include <filesystem>
 #include <csignal>
@@ -23,6 +24,7 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, handle_signal);
     std::signal(SIGTERM, handle_signal);
     std::signal(SIGPIPE, SIG_IGN);
+    lxace::cli::Terminal::install_signal_handlers();
 
     std::filesystem::path project_dir = std::filesystem::current_path();
     int port = 8080;

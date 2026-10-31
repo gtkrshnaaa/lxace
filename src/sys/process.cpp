@@ -53,7 +53,9 @@ ProcessResult ProcessRunner::execute_args(
     }
 
     if (pid == 0) {
-        // Child process
+        // Child process - create dedicated process group
+        setpgid(0, 0);
+
         close(stdout_pipe[0]);
         close(stderr_pipe[0]);
 
@@ -102,7 +104,8 @@ ProcessResult ProcessRunner::execute_args(
         );
         if (elapsed >= timeout) {
             result.timed_out = true;
-            kill(pid, SIGKILL);
+            // Send SIGKILL to the entire process group
+            kill(-pid, SIGKILL);
             break;
         }
 
