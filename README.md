@@ -75,6 +75,8 @@ lxace/
 ├── README.md                   # Documentation and usage guide
 ├── LICENSE                     # MIT License
 ├── docs/
+│   ├── api/
+│   │   └── api-reference.md   # Comprehensive REST and SSE API documentation
 │   └── prd/
 │       └── prd.md             # Product Requirements Document
 ├── scripts/
@@ -106,7 +108,7 @@ lxace/
 
 ## API Endpoints
 
-The background HTTP server listens on port 8080 by default:
+The background HTTP server listens on port 8080 by default. For complete request and response schemas, Server-Sent Events specifications, error codes, and curl examples, see the detailed [API Reference Specification](docs/api/api-reference.md).
 
 | Endpoint | Method | Description |
 |---|---|---|

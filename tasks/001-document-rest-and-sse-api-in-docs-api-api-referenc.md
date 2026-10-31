@@ -2,7 +2,7 @@
 id: "001"
 title: "Document REST and SSE API in docs/api/api-reference.md"
 type: "docs"
-status: "in-progress"
+status: "done"
 created_at: "2026-10-31"
 updated_at: "2026-10-31"
 ---
@@ -13,12 +13,12 @@ updated_at: "2026-10-31"
 Comprehensive, production-grade API documentation for the LXACE REST and Server-Sent Events (SSE) interface.
 
 ## Acceptance Criteria
-- [ ] Detail architectural overview and protocol specifications (HTTP/1.1 REST + SSE RFC 8895)
-- [ ] Document all 10 API endpoints with methods, parameters, request/response JSON schemas, error codes, and curl examples
-- [ ] Document Server-Sent Events stream specification, event kinds, and heartbeat mechanism
-- [ ] Document resource governance and 50% CPU/RAM cap representation
-- [ ] Link `docs/api/api-reference.md` in `README.md` and verify zero broken links
-- [ ] Run test suite (`make test`) and verify 100% passing tests
+- [x] Detail architectural overview and protocol specifications (HTTP/1.1 REST + SSE RFC 8895)
+- [x] Document all 10 API endpoints with methods, parameters, request/response JSON schemas, error codes, and curl examples
+- [x] Document Server-Sent Events stream specification, event kinds, and heartbeat mechanism
+- [x] Document resource governance and 50% CPU/RAM cap representation
+- [x] Link `docs/api/api-reference.md` in `README.md` and verify zero broken links
+- [x] Run test suite (`make test`) and verify 100% passing tests
 
 ## Context / Notes
 - Target files: `docs/api/api-reference.md`, `README.md`
