@@ -12,16 +12,17 @@ all: build
 
 build:
 	@mkdir -p $(BUILD_DIR)
-	@cd $(BUILD_DIR) && cmake -DCMAKE_BUILD_TYPE=Release .. && $(MAKE) --no-print-directory
+	@docker build --target artifacts --output type=local,dest=$(BUILD_DIR) .
 
-test:
-	@./tests/scripts/sh/test.sh
+test: docker-test
+
+PREFIX ?= $(shell [ -w /usr/local/bin ] && echo /usr/local || echo $(HOME)/.local)
 
 install:
-	@./scripts/sh/install.sh
+	@PREFIX="$(PREFIX)" ./scripts/sh/install.sh
 
 uninstall:
-	@./scripts/sh/uninstall.sh
+	@PREFIX="$(PREFIX)" ./scripts/sh/uninstall.sh
 
 run: build
 	@./$(BUILD_DIR)/lxace
@@ -30,6 +31,7 @@ docker-build:
 	@docker build -t lxace-engine:latest .
 
 docker-run: docker-build
+	@docker rm -f lxace-engine-runtime 2>/dev/null || true
 	@docker run --rm -it \
 		--name lxace-engine-runtime \
 		--cpus $(DOCKER_CPUS) \
@@ -40,7 +42,6 @@ docker-run: docker-build
 
 docker-test: docker-build
 	@docker run --rm \
-		--name lxace-engine-test \
 		--cpus $(DOCKER_CPUS) \
 		--memory $(DOCKER_MEM) \
 		--entrypoint /usr/local/bin/lxace_tests \

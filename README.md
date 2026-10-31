@@ -153,6 +153,12 @@ Install binary into system PATH (accessible from any directory):
 # or: make install
 ```
 
+Check installed version from any directory:
+```bash
+lxace -v
+# or: lxace --version
+```
+
 Uninstall binary:
 ```bash
 ./scripts/sh/uninstall.sh

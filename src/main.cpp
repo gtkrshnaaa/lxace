@@ -1,4 +1,5 @@
 #include "core/engine.hpp"
+#include "core/version.hpp"
 #include "cli/cli_app.hpp"
 #include "cli/terminal.hpp"
 #include <iostream>
@@ -38,13 +39,17 @@ int main(int argc, char* argv[]) {
             try { port = std::stoi(argv[++i]); } catch (...) {}
         } else if (arg == "--headless") {
             headless = true;
+        } else if (arg == "--version" || arg == "-v" || arg == "-V") {
+            std::cout << lxace::core::format_version() << "\n";
+            return 0;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: lxace [options]\n"
                       << "Options:\n"
                       << "  --project-dir <path>  Target project directory (default: current)\n"
                       << "  --port <port>         HTTP/SSE API server port (default: 8080)\n"
                       << "  --headless            Run API engine without interactive CLI\n"
-                      << "  --help, -h            Show this help message\n";
+                      << "  -v, -V, --version     Display version information\n"
+                      << "  -h, --help            Show this help message\n";
             return 0;
         }
     }

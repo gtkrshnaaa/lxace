@@ -6,21 +6,10 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 export CXX="${CXX:-g++}"
 
-echo "Building test suite..."
-mkdir -p "${BUILD_DIR}"
-cd "${BUILD_DIR}"
-cmake -DCMAKE_BUILD_TYPE=Debug "${PROJECT_ROOT}"
-make -j"$(nproc)" lxace_tests
-
-echo "Running tests..."
-sync
-chmod +x "${BUILD_DIR}/lxace_tests"
-
-# Handle potential ETXTBSY from immediate linker flush
-for i in {1..5}; do
-    if "${BUILD_DIR}/lxace_tests"; then
-        exit 0
-    fi
-    sleep 0.2
-done
-exit 1
+echo "Executing test suite inside container (50% CPU and memory cap)..."
+docker build -t lxace-engine:latest "${PROJECT_ROOT}"
+docker run --rm \
+    --cpus 4.0 \
+    --memory 3500M \
+    --entrypoint /usr/local/bin/lxace_tests \
+    lxace-engine:latest

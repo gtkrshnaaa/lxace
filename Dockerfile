@@ -11,9 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY . .
 
-RUN mkdir -p build && cd build \
+RUN rm -rf build && mkdir -p build && cd build \
     && cmake -DCMAKE_BUILD_TYPE=Release .. \
-    && make -j$(nproc) lxace lxace_tests
+    && make -j4 lxace lxace_tests
+
+# Binary export stage for host installation via BuildKit
+FROM scratch AS artifacts
+COPY --from=builder /app/build/lxace /lxace
+COPY --from=builder /app/build/lxace_tests /lxace_tests
 
 # Production runtime stage
 FROM ubuntu:24.04 AS runner

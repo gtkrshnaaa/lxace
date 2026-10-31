@@ -65,6 +65,7 @@ set(TEST_SOURCES
     tests/test_fs.cpp
     tests/test_process.cpp
     tests/test_http.cpp
+    tests/test_version.cpp
 )
 
 add_executable(lxace_tests
@@ -74,3 +75,6 @@ add_executable(lxace_tests
 
 target_include_directories(lxace_tests PRIVATE src tests)
 target_link_libraries(lxace_tests PRIVATE pthread)
+
+# Installation specification
+install(TARGETS lxace RUNTIME DESTINATION bin)

@@ -6,56 +6,91 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
 export CXX="${CXX:-g++}"
 
-echo "=== LXACE Installation ==="
+echo "========================================"
+echo "LXACE Engine OS Installation"
+echo "========================================"
 
-# 1. Build the release binary
-echo "Building release binary..."
+# 1. Build release binary inside isolated container (50% caps) and export cleanly
+echo "Step 1: Compiling release binary in containerized builder..."
 mkdir -p "${BUILD_DIR}"
-cd "${BUILD_DIR}"
-cmake -DCMAKE_BUILD_TYPE=Release "${PROJECT_ROOT}"
-make -j"$(nproc)" lxace
+docker build --target artifacts --output type=local,dest="${BUILD_DIR}" "${PROJECT_ROOT}"
 
 if [ ! -f "${BUILD_DIR}/lxace" ]; then
-    echo "Error: Build failed, binary not found." >&2
+    echo "Error: Containerized build failed, binary not found." >&2
     exit 1
 fi
 
-# 2. Determine installation destination
+# 2. Determine installation destinations
 PREFIX="${PREFIX:-}"
-if [ -z "${PREFIX}" ]; then
-    if [ -w "/usr/local/bin" ]; then
-        PREFIX="/usr/local/bin"
-    elif [ -d "/home/user/.local/bin" ] && [ -w "/home/user/.local/bin" ]; then
-        PREFIX="/home/user/.local/bin"
+DEST_DIRS=()
+
+if [ -n "${PREFIX}" ]; then
+    if [[ "${PREFIX}" == */bin ]]; then
+        DEST_DIRS+=("${PREFIX}")
     else
-        PREFIX="${HOME}/.local/bin"
+        DEST_DIRS+=("${PREFIX}/bin")
+    fi
+else
+    if [ -w "/usr/local/bin" ]; then
+        DEST_DIRS+=("/usr/local/bin")
+    fi
+    if [ -d "/home/user/.local/bin" ] && [ -w "/home/user/.local/bin" ]; then
+        DEST_DIRS+=("/home/user/.local/bin")
+    fi
+    if [ -n "${HOME:-}" ] && [ -w "${HOME}" ]; then
+        USER_LOCAL_BIN="${HOME}/.local/bin"
+        # Avoid duplicate entry
+        if [[ ! " ${DEST_DIRS[*]} " =~ " ${USER_LOCAL_BIN} " ]]; then
+            DEST_DIRS+=("${USER_LOCAL_BIN}")
+        fi
     fi
 fi
 
-mkdir -p "${PREFIX}"
-TARGET_BIN="${PREFIX}/lxace"
+# 3. Atomically install binary to designated locations
+echo "Step 2: Installing binary to destination paths..."
+for BIN_DIR in "${DEST_DIRS[@]}"; do
+    mkdir -p "${BIN_DIR}"
+    TARGET_BIN="${BIN_DIR}/lxace"
+    echo "  Installing to ${TARGET_BIN}..."
+    if command -v install >/dev/null 2>&1; then
+        install -m 755 "${BUILD_DIR}/lxace" "${TARGET_BIN}"
+    else
+        cp "${BUILD_DIR}/lxace" "${TARGET_BIN}.tmp"
+        chmod 755 "${TARGET_BIN}.tmp"
+        mv -f "${TARGET_BIN}.tmp" "${TARGET_BIN}"
+    fi
+done
 
-echo "Installing binary to ${TARGET_BIN}..."
-cp "${BUILD_DIR}/lxace" "${TARGET_BIN}"
-chmod 755 "${TARGET_BIN}"
+# 4. Verify and configure shell PATH persistence
+echo "Step 3: Verifying shell PATH configuration..."
+for BIN_DIR in "${DEST_DIRS[@]}"; do
+    for PROFILE_FILE in "${HOME}/.bashrc" "${HOME}/.profile" "/home/user/.bashrc" "/home/user/.profile"; do
+        if [ -f "${PROFILE_FILE}" ] && [ -w "${PROFILE_FILE}" ]; then
+            if ! grep -q "${BIN_DIR}" "${PROFILE_FILE}"; then
+                echo "  Adding ${BIN_DIR} to ${PROFILE_FILE}..."
+                echo "export PATH=\"${BIN_DIR}:\$PATH\"" >> "${PROFILE_FILE}"
+            fi
+        fi
+    done
+done
 
-# 3. Verify PATH availability
-case ":${PATH}:" in
-    *:"${PREFIX}":*)
-        echo "Prefix ${PREFIX} is already in PATH."
-        ;;
-    *)
-        echo "Notice: ${PREFIX} is not in your current PATH."
-        echo "Add the following line to your ~/.bashrc or ~/.profile:"
-        echo "  export PATH=\"${PREFIX}:\$PATH\""
-        ;;
-esac
+# 5. Verification probes across system paths
+echo "Step 4: Executing verification probes..."
+for BIN_DIR in "${DEST_DIRS[@]}"; do
+    TARGET_BIN="${BIN_DIR}/lxace"
+    if [ -x "${TARGET_BIN}" ]; then
+        VERSION_OUTPUT="$("${TARGET_BIN}" -v)"
+        echo "  [OK] ${TARGET_BIN}: ${VERSION_OUTPUT}"
+    fi
+done
 
-# 4. Verification test
-echo "Verifying installation..."
-if "${TARGET_BIN}" --help >/dev/null 2>&1; then
-    echo "Successfully installed LXACE to ${TARGET_BIN}"
-    echo "You can now run 'lxace' from anywhere in your terminal."
-else
-    echo "Warning: Binary installed but returned error on execution." >&2
-fi
+# Test execution from arbitrary location (/tmp) using system PATH
+RESOLVED_BIN="$(cd /tmp && which lxace)"
+GLOBAL_VERSION="$(cd /tmp && lxace -v)"
+echo "  [OK] Global PATH resolution: ${RESOLVED_BIN}"
+echo "  [OK] Executed from /tmp: ${GLOBAL_VERSION}"
+
+echo "========================================"
+echo "Installation verified successfully."
+echo "You can now run 'lxace -v' or 'lxace' from any path on the OS."
+echo "========================================"

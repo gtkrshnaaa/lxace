@@ -1,0 +1,17 @@
+.git
+.gitignore
+.aicodeeditor_context_archive
+.aicodeeditor_context_window
+build
+bin
+*.o
+*.a
+*.so
+*.out
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.lxace
+*.log
