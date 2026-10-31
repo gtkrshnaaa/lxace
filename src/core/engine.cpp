@@ -1,0 +1,161 @@
+#include "core/engine.hpp"
+#include "json/json_value.hpp"
+#include "json/json_parser.hpp"
+#include "sys/fs.hpp"
+#include "sys/process.hpp"
+
+namespace lxace::core {
+
+Engine::Engine(std::filesystem::path project_dir, int port)
+    : project_dir_(std::move(project_dir)), port_(port) {
+    auto config_file = project_dir_ / ".lxace" / "config.json";
+    config_ = std::make_shared<ConfigManager>(config_file);
+    event_bus_ = std::make_shared<EventBus>();
+    ring_buffer_ = std::make_shared<RingBuffer<std::string>>(500);
+    orchestrator_ = std::make_shared<agent::Orchestrator>(event_bus_);
+    sse_manager_ = std::make_shared<net::SseStreamManager>();
+    http_router_ = std::make_shared<net::HttpRouter>();
+    http_server_ = std::make_shared<net::HttpServer>(static_cast<uint16_t>(port_));
+}
+
+Engine::~Engine() {
+    stop_services();
+}
+
+bool Engine::initialize() {
+    // Listen to events to populate ring buffer and SSE stream
+    event_bus_listener_id_ = event_bus_->subscribe([this](const Event& ev) {
+        std::string line = ev.format_cli_line();
+        ring_buffer_->push(line);
+        if (sse_manager_) {
+            sse_manager_->broadcast(ev);
+        }
+    });
+
+    register_api_routes();
+    http_server_->set_router(http_router_);
+    http_server_->set_sse_manager(sse_manager_);
+
+    return true;
+}
+
+void Engine::start_services() {
+    http_server_->start();
+}
+
+void Engine::stop_services() {
+    if (event_bus_ && event_bus_listener_id_ > 0) {
+        event_bus_->unsubscribe(event_bus_listener_id_);
+        event_bus_listener_id_ = 0;
+    }
+    if (orchestrator_) {
+        orchestrator_->stop_all();
+    }
+    if (http_server_) {
+        http_server_->stop();
+    }
+}
+
+void Engine::submit_prompt(const std::string& prompt) {
+    if (orchestrator_) {
+        orchestrator_->submit_prompt(prompt);
+    }
+}
+
+void Engine::stop_all() {
+    if (orchestrator_) {
+        orchestrator_->stop_all();
+    }
+}
+
+void Engine::register_api_routes() {
+    // GET /api/session
+    http_router_->add_route(net::HttpMethod::Get, "/api/session", [this](const net::HttpRequest&) {
+        json::JsonObject obj;
+        obj["project_dir"] = project_dir_.string();
+        obj["model"] = config_->get().model;
+        obj["base_url"] = config_->get().base_url;
+        obj["api_key_masked"] = config_->masked_api_key();
+
+        json::JsonArray tasks_arr;
+        for (const auto& t : orchestrator_->get_tasks()) {
+            json::JsonObject t_obj;
+            t_obj["id"] = t.id;
+            t_obj["prompt"] = t.prompt;
+            t_obj["state"] = agent::task_state_to_string(t.state);
+            t_obj["assigned_agent"] = t.assigned_agent;
+            tasks_arr.push_back(json::JsonValue(t_obj));
+        }
+        obj["tasks"] = json::JsonValue(tasks_arr);
+        return net::HttpResponse::json(200, json::JsonValue(obj).serialize());
+    });
+
+    // POST /api/prompt
+    http_router_->add_route(net::HttpMethod::Post, "/api/prompt", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed || !parsed->contains("prompt")) {
+            return net::HttpResponse::json(400, "{\"error\": \"Missing prompt field\"}");
+        }
+        std::string prompt = (*parsed)["prompt"].as_string();
+        std::string task_id = orchestrator_->submit_prompt(prompt);
+        json::JsonObject res;
+        res["task_id"] = task_id;
+        res["status"] = "queued";
+        return net::HttpResponse::json(200, json::JsonValue(res).serialize());
+    });
+
+    // POST /api/stop
+    http_router_->add_route(net::HttpMethod::Post, "/api/stop", [this](const net::HttpRequest&) {
+        stop_all();
+        return net::HttpResponse::json(200, "{\"status\": \"all tasks stopped\"}");
+    });
+
+    // GET /api/settings
+    http_router_->add_route(net::HttpMethod::Get, "/api/settings", [this](const net::HttpRequest&) {
+        auto conf = config_->get();
+        json::JsonObject obj;
+        obj["base_url"] = conf.base_url;
+        obj["api_key_masked"] = config_->masked_api_key();
+        obj["model"] = conf.model;
+        obj["max_tokens"] = conf.max_tokens;
+        obj["temperature"] = conf.temperature;
+        obj["server_port"] = conf.server_port;
+        return net::HttpResponse::json(200, json::JsonValue(obj).serialize());
+    });
+
+    // POST /api/settings
+    http_router_->add_route(net::HttpMethod::Post, "/api/settings", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed) {
+            return net::HttpResponse::json(400, "{\"error\": \"Invalid JSON\"}");
+        }
+        auto conf = config_->get();
+        if (parsed->contains("base_url")) conf.base_url = (*parsed)["base_url"].as_string();
+        if (parsed->contains("api_key")) conf.api_key = (*parsed)["api_key"].as_string();
+        if (parsed->contains("model")) conf.model = (*parsed)["model"].as_string();
+        if (parsed->contains("max_tokens")) conf.max_tokens = static_cast<int>((*parsed)["max_tokens"].as_int());
+        if (parsed->contains("temperature")) conf.temperature = (*parsed)["temperature"].as_double();
+        config_->update(conf);
+        return net::HttpResponse::json(200, "{\"status\": \"updated\"}");
+    });
+
+    // POST /api/exec
+    http_router_->add_route(net::HttpMethod::Post, "/api/exec", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed || !parsed->contains("command")) {
+            return net::HttpResponse::json(400, "{\"error\": \"Missing command field\"}");
+        }
+        std::string cmd = (*parsed)["command"].as_string();
+        auto result = sys::ProcessRunner::execute(cmd, project_dir_.string());
+
+        json::JsonObject res;
+        res["exit_code"] = result.exit_code;
+        res["stdout"] = result.stdout_output;
+        res["stderr"] = result.stderr_output;
+        res["timed_out"] = result.timed_out;
+        res["duration_ms"] = result.duration_ms;
+        return net::HttpResponse::json(200, json::JsonValue(res).serialize());
+    });
+}
+
+} // namespace lxace::core

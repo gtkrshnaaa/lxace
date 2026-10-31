@@ -1,0 +1,18 @@
+# Build artifacts
+build/
+bin/
+*.o
+*.a
+*.so
+*.out
+
+# Editor and IDE metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary execution files
+.lxace/
+*.log
