@@ -69,15 +69,18 @@ The engine exposes a REST and Server-Sent Events (SSE) API surface for external 
 ```
 lxace/
 ├── CMakeLists.txt              # Primary CMake configuration (C++20, strict flags)
-├── Makefile                    # Make targets including containerized 50% cap tasks
+├── Makefile                    # Make targets including installation and container tasks
 ├── Dockerfile                  # Multi-stage isolated build and unprivileged runtime
 ├── docker-compose.yml          # Container deployment with 50% CPU and memory limits
-├── test.sh                     # Automated test execution script
 ├── README.md                   # Documentation and usage guide
 ├── LICENSE                     # MIT License
 ├── docs/
 │   └── prd/
 │       └── prd.md             # Product Requirements Document
+├── scripts/
+│   └── sh/
+│       ├── install.sh         # System binary installation script
+│       └── uninstall.sh       # Clean binary removal script
 ├── src/
 │   ├── main.cpp                # Application entry point and signal orchestration
 │   ├── core/                   # State, configuration, event bus, and ring buffer
@@ -87,6 +90,9 @@ lxace/
 │   ├── agent/                  # Sub-agent workers and prompt orchestrator
 │   └── cli/                    # Terminal dimension detection and view state machine
 └── tests/
+    ├── scripts/
+    │   └── sh/
+    │       └── test.sh        # Automated test execution script
     ├── test_runner.hpp         # Lightweight zero-dependency unit test framework
     ├── test_main.cpp           # Test runner entry point
     ├── test_ring_buffer.cpp    # Ring buffer capacity, eviction, and versioning tests
@@ -135,17 +141,31 @@ make build
 
 Run all automated unit tests:
 ```bash
-./test.sh
+./tests/scripts/sh/test.sh
+# or: make test
+```
+
+Install binary into system PATH (accessible from any directory):
+```bash
+./scripts/sh/install.sh
+# or: make install
+```
+
+Uninstall binary:
+```bash
+./scripts/sh/uninstall.sh
+# or: make uninstall
 ```
 
 Run LXACE in interactive CLI mode:
 ```bash
-./build/lxace
+lxace
+# or: ./build/lxace
 ```
 
 Run in headless mode (API server only):
 ```bash
-./build/lxace --headless --port 8080 --project-dir /path/to/project
+lxace --headless --port 8080 --project-dir /path/to/project
 ```
 
 ### Containerized Execution (50% Resource Cap Enforced)

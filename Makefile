@@ -1,4 +1,4 @@
-.PHONY: all build test run clean docker-build docker-run docker-test
+.PHONY: all build test run clean install uninstall docker-build docker-run docker-test
 
 BUILD_DIR ?= build
 export CXX ?= g++
@@ -15,10 +15,13 @@ build:
 	@cd $(BUILD_DIR) && cmake -DCMAKE_BUILD_TYPE=Release .. && $(MAKE) --no-print-directory
 
 test:
-	@mkdir -p $(BUILD_DIR)
-	@cd $(BUILD_DIR) && cmake -DCMAKE_BUILD_TYPE=Debug .. && $(MAKE) --no-print-directory lxace_tests
-	@sync
-	@./$(BUILD_DIR)/lxace_tests
+	@./tests/scripts/sh/test.sh
+
+install:
+	@./scripts/sh/install.sh
+
+uninstall:
+	@./scripts/sh/uninstall.sh
 
 run: build
 	@./$(BUILD_DIR)/lxace
