@@ -99,4 +99,51 @@ std::string Terminal::read_line() {
     return line;
 }
 
+std::string Terminal::read_masked_line(char mask_char) {
+    enable_raw_mode();
+    std::string input;
+
+    while (true) {
+        int key = read_key_timeout(1000);
+        if (key == -1) {
+            continue;
+        }
+
+        // Enter key (CR or LF)
+        if (key == '\r' || key == '\n') {
+            std::cout << "\n" << std::flush;
+            break;
+        }
+
+        // Backspace key (ASCII 127 or BS / 8)
+        if (key == 127 || key == '\b' || key == 8) {
+            if (!input.empty()) {
+                input.pop_back();
+                if (mask_char != '\0') {
+                    std::cout << "\b \b" << std::flush;
+                }
+            }
+            continue;
+        }
+
+        // Ctrl+C, Ctrl+D, or ESC to cancel
+        if (key == 3 || key == 4 || key == 27) {
+            std::cout << "\n" << std::flush;
+            input.clear();
+            break;
+        }
+
+        // Printable ASCII
+        if (key >= 32 && key <= 126) {
+            input.push_back(static_cast<char>(key));
+            if (mask_char != '\0') {
+                std::cout << mask_char << std::flush;
+            }
+        }
+    }
+
+    disable_raw_mode();
+    return input;
+}
+
 } // namespace lxace::cli

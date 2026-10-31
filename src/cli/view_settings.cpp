@@ -41,13 +41,13 @@ ViewState ViewSettings::handle_input(core::Engine&) {
 void ViewSettings::render_base_url(const core::Engine& engine) {
     Terminal::clear_screen();
     std::cout << "=== SETTINGS > BASE URL ===\n\n"
-              << "Current: " << engine.config()->get().base_url << "\n\n"
+              << "Current: " << engine.config()->masked_base_url() << "\n\n"
               << "Enter new base URL (empty to cancel):\n"
               << ": " << std::flush;
 }
 
 ViewState ViewSettings::handle_base_url(core::Engine& engine) {
-    std::string input = Terminal::read_line();
+    std::string input = Terminal::read_masked_line('*');
     if (!input.empty()) {
         engine.config()->set_base_url(input);
     }
@@ -63,7 +63,7 @@ void ViewSettings::render_api_key(const core::Engine& engine) {
 }
 
 ViewState ViewSettings::handle_api_key(core::Engine& engine) {
-    std::string input = Terminal::read_line();
+    std::string input = Terminal::read_masked_line('*');
     if (!input.empty()) {
         engine.config()->set_api_key(input);
     }

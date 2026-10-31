@@ -90,6 +90,28 @@ std::string ConfigManager::masked_api_key() const {
     return mask_key(data_.api_key);
 }
 
+std::string ConfigManager::mask_url(const std::string& url) {
+    if (url.empty()) return "(none)";
+    if (url.length() <= 8) return "https://****";
+
+    auto scheme_pos = url.find("://");
+    size_t prefix_len = (scheme_pos != std::string::npos) ? scheme_pos + 3 : 4;
+    if (prefix_len >= url.length()) prefix_len = 0;
+
+    std::string prefix = url.substr(0, prefix_len);
+    std::string suffix = (url.length() > prefix_len + 5) ? url.substr(url.length() - 3) : "";
+    size_t star_count = (url.length() > prefix.length() + suffix.length())
+                        ? (url.length() - prefix.length() - suffix.length())
+                        : 4;
+
+    return prefix + std::string(std::max<size_t>(4, star_count), '*') + suffix;
+}
+
+std::string ConfigManager::masked_base_url() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return mask_url(data_.base_url);
+}
+
 bool ConfigManager::load_from_file(const std::filesystem::path& path) {
     std::ifstream file(path);
     if (!file.is_open()) {

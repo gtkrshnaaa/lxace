@@ -31,7 +31,9 @@ public:
     void set_server_port(int port);
 
     [[nodiscard]] std::string masked_api_key() const;
+    [[nodiscard]] std::string masked_base_url() const;
     static std::string mask_key(const std::string& key);
+    static std::string mask_url(const std::string& url);
 
     bool load_from_file(const std::filesystem::path& path);
     bool save_to_file(const std::filesystem::path& path) const;

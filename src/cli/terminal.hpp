@@ -21,6 +21,7 @@ public:
     static int read_key_timeout(int timeout_ms = 100);
     static char read_char();
     static std::string read_line();
+    static std::string read_masked_line(char mask_char = '*');
     static void install_signal_handlers();
     static bool check_and_reset_resized();
 };

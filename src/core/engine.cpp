@@ -76,6 +76,7 @@ void Engine::register_api_routes() {
         obj["project_dir"] = project_dir_.string();
         obj["model"] = config_->get().model;
         obj["base_url"] = config_->get().base_url;
+        obj["base_url_masked"] = config_->masked_base_url();
         obj["api_key_masked"] = config_->masked_api_key();
 
         // 50% max resource limits
@@ -130,6 +131,7 @@ void Engine::register_api_routes() {
         auto conf = config_->get();
         json::JsonObject obj;
         obj["base_url"] = conf.base_url;
+        obj["base_url_masked"] = config_->masked_base_url();
         obj["api_key_masked"] = config_->masked_api_key();
         obj["model"] = conf.model;
         obj["max_tokens"] = conf.max_tokens;

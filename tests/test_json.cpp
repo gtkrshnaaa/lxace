@@ -1,6 +1,7 @@
 #include "test_runner.hpp"
 #include "json/json_parser.hpp"
 #include "json/json_writer.hpp"
+#include "core/config.hpp"
 
 using namespace lxace::json;
 
@@ -43,4 +44,18 @@ TEST_CASE(json_object_and_array) {
     auto reparsed = JsonParser::parse(serialized);
     ASSERT_TRUE(reparsed.has_value());
     ASSERT_EQ((*reparsed)["name"].as_string(), "lxace");
+}
+
+TEST_CASE(config_masking_base_url_and_api_key) {
+    using namespace lxace::core;
+    std::string key = "sk-1234567890abcdef";
+    std::string masked_k = ConfigManager::mask_key(key);
+    ASSERT_TRUE(masked_k.find("sk-") == 0);
+    ASSERT_TRUE(masked_k.find("****") != std::string::npos);
+    ASSERT_TRUE(masked_k.find("cdef") != std::string::npos);
+
+    std::string url = "https://api.openai.com/v1";
+    std::string masked_u = ConfigManager::mask_url(url);
+    ASSERT_TRUE(masked_u.find("https://") == 0);
+    ASSERT_TRUE(masked_u.find("****") != std::string::npos);
 }
