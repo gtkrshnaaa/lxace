@@ -93,13 +93,69 @@ char Terminal::read_char() {
     return 0;
 }
 
+bool Terminal::is_tty() {
+    return isatty(STDIN_FILENO) != 0;
+}
+
 std::string Terminal::read_line() {
     std::string line;
     std::getline(std::cin, line);
     return line;
 }
 
+std::string Terminal::read_interactive_line(bool* cancelled) {
+    if (cancelled) *cancelled = false;
+    if (!is_tty()) {
+        std::string line;
+        if (!std::getline(std::cin, line)) {
+            if (cancelled) *cancelled = true;
+        }
+        return line;
+    }
+
+    enable_raw_mode();
+    std::string input;
+
+    while (true) {
+        int key = read_key_timeout(100);
+        if (key == -1) {
+            continue;
+        }
+
+        if (key == '\r' || key == '\n') {
+            std::cout << "\n" << std::flush;
+            break;
+        }
+
+        if (key == 127 || key == '\b' || key == 8) {
+            if (!input.empty()) {
+                input.pop_back();
+                std::cout << "\b \b" << std::flush;
+            }
+            continue;
+        }
+
+        if (key == 3 || key == 4 || key == 27) { // Ctrl+C, Ctrl+D, ESC
+            std::cout << "\n" << std::flush;
+            input.clear();
+            if (cancelled) *cancelled = true;
+            break;
+        }
+
+        if (key >= 32 && key <= 126) {
+            input.push_back(static_cast<char>(key));
+            std::cout << static_cast<char>(key) << std::flush;
+        }
+    }
+
+    disable_raw_mode();
+    return input;
+}
+
 std::string Terminal::read_masked_line(char mask_char) {
+    if (!is_tty()) {
+        return read_line();
+    }
     enable_raw_mode();
     std::string input;
 

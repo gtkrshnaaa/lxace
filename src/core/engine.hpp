@@ -24,6 +24,7 @@ public:
     void stop_services();
 
     [[nodiscard]] const std::filesystem::path& project_dir() const { return project_dir_; }
+    [[nodiscard]] int port() const { return port_; }
     [[nodiscard]] std::shared_ptr<ConfigManager> config() const { return config_; }
     [[nodiscard]] std::shared_ptr<EventBus> event_bus() const { return event_bus_; }
     [[nodiscard]] std::shared_ptr<RingBuffer<std::string>> ring_buffer() const { return ring_buffer_; }

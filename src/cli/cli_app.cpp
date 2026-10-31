@@ -26,30 +26,38 @@ void CliApp::run() {
             case ViewState::Settings:
                 view_settings_.render(*engine_);
                 current_state_ = view_settings_.handle_input(*engine_);
+                if (current_state_ == ViewState::Home && !view_settings_.notification().empty()) {
+                    view_home_.set_notification(view_settings_.notification().type, view_settings_.notification().text);
+                    view_settings_.clear_notification();
+                }
                 break;
             case ViewState::SettingsBaseUrl:
-                ViewSettings::render_base_url(*engine_);
-                current_state_ = ViewSettings::handle_base_url(*engine_);
+                view_settings_.render_base_url(*engine_);
+                current_state_ = view_settings_.handle_base_url(*engine_);
                 break;
             case ViewState::SettingsApiKey:
-                ViewSettings::render_api_key(*engine_);
-                current_state_ = ViewSettings::handle_api_key(*engine_);
+                view_settings_.render_api_key(*engine_);
+                current_state_ = view_settings_.handle_api_key(*engine_);
                 break;
             case ViewState::SettingsModel:
-                ViewSettings::render_model(*engine_);
-                current_state_ = ViewSettings::handle_model(*engine_);
+                view_settings_.render_model(*engine_);
+                current_state_ = view_settings_.handle_model(*engine_);
                 break;
             case ViewState::SettingsMaxTokens:
-                ViewSettings::render_max_tokens(*engine_);
-                current_state_ = ViewSettings::handle_max_tokens(*engine_);
+                view_settings_.render_max_tokens(*engine_);
+                current_state_ = view_settings_.handle_max_tokens(*engine_);
                 break;
             case ViewState::SettingsTemperature:
-                ViewSettings::render_temperature(*engine_);
-                current_state_ = ViewSettings::handle_temperature(*engine_);
+                view_settings_.render_temperature(*engine_);
+                current_state_ = view_settings_.handle_temperature(*engine_);
                 break;
             case ViewState::WritePrompt:
                 view_prompt_.render(*engine_);
                 current_state_ = view_prompt_.handle_input(*engine_);
+                if (!view_prompt_.notification().empty()) {
+                    view_home_.set_notification(view_prompt_.notification().type, view_prompt_.notification().text);
+                    view_prompt_.clear_notification();
+                }
                 break;
             case ViewState::Exit:
                 running_ = false;

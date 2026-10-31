@@ -20,7 +20,9 @@ public:
     static bool is_stdin_ready(int timeout_ms = 100);
     static int read_key_timeout(int timeout_ms = 100);
     static char read_char();
+    static bool is_tty();
     static std::string read_line();
+    static std::string read_interactive_line(bool* cancelled = nullptr);
     static std::string read_masked_line(char mask_char = '*');
     static void install_signal_handlers();
     static bool check_and_reset_resized();
