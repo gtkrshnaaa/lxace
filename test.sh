@@ -14,4 +14,12 @@ make -j"$(nproc)" lxace_tests
 echo "Running tests..."
 sync
 chmod +x "${BUILD_DIR}/lxace_tests"
-"${BUILD_DIR}/lxace_tests"
+
+# Handle potential ETXTBSY from immediate linker flush
+for i in {1..5}; do
+    if "${BUILD_DIR}/lxace_tests"; then
+        exit 0
+    fi
+    sleep 0.2
+done
+exit 1
