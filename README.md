@@ -1,5 +1,12 @@
 # Linux AI Control Engine (LXACE)
 
+> [!IMPORTANT]
+> **MANDATORY RESOURCE POLICY: 50% HOST RESOURCE CAP AND CONTAINER ISOLATION**
+> All developers, CI/CD pipelines, and runtime orchestration bundles must strictly enforce the 50% maximum host resource policy:
+> 1. **Strict 50% CPU and RAM Cap**: Total container resource allocations across CPU cores and system memory must never exceed 50% of the host machine's total capacity (for example, maximum 4.0 CPUs and 3500M RAM on an 8-core / 7GB workstation). This preserves host OS responsiveness, battery longevity, and thermal headroom.
+> 2. **Containerized Execution**: All persistent runtimes, background sub-agent processes, web servers, and compilation pipelines must execute inside isolated, unprivileged Docker containers (`USER appuser`).
+> 3. **Native Runtime Metrics**: The engine dynamically probes `/proc/cpuinfo` and `/proc/meminfo` via `ProcfsReader::get_50_percent_cpu_cap()` and `ProcfsReader::get_50_percent_memory_cap()`, exposing active thresholds in `GET /api/session`.
+
 LXACE is a self-contained, high-performance C++ control engine built exclusively for Linux environments. It provides native control over the underlying operating system through direct POSIX system calls and standard library abstractions rather than relying on bash subshells. 
 
 The engine exposes a REST and Server-Sent Events (SSE) API surface for external wrappers (desktop environments, web applications, and external CLIs) while concurrently running an adaptive, menu-driven terminal interface.
@@ -19,6 +26,9 @@ The engine exposes a REST and Server-Sent Events (SSE) API surface for external 
 
 4. Dual-Interface Core
    Serves external integration via an epoll-driven HTTP/1.1 and SSE server while maintaining a terminal CLI that adapts dynamically to window height and streams background sub-agent activity in real time.
+
+5. Enforced 50% Resource Governance
+   Container definitions and Makefile targets enforce strict resource ceilings (`--cpus` and `--memory` limits capped to 50% of the host capacity).
 
 ---
 
@@ -59,8 +69,8 @@ The engine exposes a REST and Server-Sent Events (SSE) API surface for external 
 ```
 lxace/
 ├── CMakeLists.txt              # Primary CMake configuration (C++20, strict flags)
-├── Makefile                    # Make targets (build, test, run, clean)
-├── Dockerfile                  # Multi-stage isolated build and runtime container
+├── Makefile                    # Make targets including containerized 50% cap tasks
+├── Dockerfile                  # Multi-stage isolated build and unprivileged runtime
 ├── docker-compose.yml          # Container deployment with 50% CPU and memory limits
 ├── test.sh                     # Automated test execution script
 ├── README.md                   # Documentation and usage guide
@@ -82,7 +92,7 @@ lxace/
     ├── test_ring_buffer.cpp    # Ring buffer capacity, eviction, and versioning tests
     ├── test_json.cpp           # JSON parser and serializer roundtrip tests
     ├── test_fs.cpp             # Filesystem operations and traversal protection tests
-    ├── test_process.cpp        # Process runner timeout and exit code tests
+    ├── test_process.cpp        # Process runner timeout, process groups, and resource tests
     └── test_http.cpp           # HTTP parser and router dispatch tests
 ```
 
@@ -94,7 +104,7 @@ The background HTTP server listens on port 8080 by default:
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/session` | GET | Returns project path, masked settings, and task statuses |
+| `/api/session` | GET | Returns project path, masked settings, tasks, and host 50% resource limits |
 | `/api/prompt` | POST | Submits a prompt payload: `{"prompt": "..."}` |
 | `/api/events` | GET | Continuous SSE stream broadcasting agent insights, actions, and messages |
 | `/api/stop` | POST | Terminates all active background sub-agent tasks |
@@ -114,8 +124,9 @@ The background HTTP server listens on port 8080 by default:
 - GNU Compiler Collection (`g++` supporting C++20)
 - CMake (version 3.20 or later)
 - GNU Make
+- Docker Engine (version 24.x or later)
 
-### Build Targets
+### Native Build Targets
 
 Compile the engine and test runner:
 ```bash
@@ -137,11 +148,30 @@ Run in headless mode (API server only):
 ./build/lxace --headless --port 8080 --project-dir /path/to/project
 ```
 
-### Docker Deployment
+### Containerized Execution (50% Resource Cap Enforced)
 
-Build and run in a resource-capped container (2 CPUs, 2048MB RAM):
+Build the multi-stage unprivileged Docker image:
 ```bash
+make docker-build
+```
+
+Execute automated unit tests inside an isolated Docker container with 50% host CPU and RAM cap:
+```bash
+make docker-test
+```
+
+Run LXACE API engine in container with 50% host CPU and RAM cap:
+```bash
+make docker-run
+```
+
+Or deploy with Docker Compose (limits configured in `docker-compose.yml`):
+```bash
+# Run engine
 docker compose up --build
+
+# Run test suite in container
+docker compose --profile test run --rm lxace-tests
 ```
 
 ---

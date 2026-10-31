@@ -27,6 +27,9 @@ public:
     static std::optional<ProcessMetrics> get_process_metrics(pid_t pid);
     static std::optional<SystemMemoryInfo> get_system_memory();
     static bool is_process_alive(pid_t pid);
+    static uint32_t get_cpu_cores();
+    static uint32_t get_50_percent_cpu_cap();
+    static uint64_t get_50_percent_memory_cap();
 };
 
 } // namespace lxace::sys

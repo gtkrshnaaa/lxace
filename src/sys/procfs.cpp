@@ -87,4 +87,19 @@ std::optional<SystemMemoryInfo> ProcfsReader::get_system_memory() {
     return std::nullopt;
 }
 
+uint32_t ProcfsReader::get_cpu_cores() {
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    return (cores > 0) ? static_cast<uint32_t>(cores) : 1;
+}
+
+uint32_t ProcfsReader::get_50_percent_cpu_cap() {
+    uint32_t cores = get_cpu_cores();
+    return std::max<uint32_t>(1, cores / 2);
+}
+
+uint64_t ProcfsReader::get_50_percent_memory_cap() {
+    auto mem = get_system_memory();
+    return mem ? (mem->total_bytes / 2) : 0;
+}
+
 } // namespace lxace::sys

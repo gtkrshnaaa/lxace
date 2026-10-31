@@ -3,6 +3,7 @@
 #include "json/json_parser.hpp"
 #include "sys/fs.hpp"
 #include "sys/process.hpp"
+#include "sys/procfs.hpp"
 
 namespace lxace::core {
 
@@ -76,6 +77,20 @@ void Engine::register_api_routes() {
         obj["model"] = config_->get().model;
         obj["base_url"] = config_->get().base_url;
         obj["api_key_masked"] = config_->masked_api_key();
+
+        // 50% max resource limits
+        uint32_t total_cpus = sys::ProcfsReader::get_cpu_cores();
+        uint32_t cpu_50_cap = sys::ProcfsReader::get_50_percent_cpu_cap();
+        auto sys_mem = sys::ProcfsReader::get_system_memory();
+        uint64_t total_mem = sys_mem ? sys_mem->total_bytes : 0;
+        uint64_t mem_50_cap = sys::ProcfsReader::get_50_percent_memory_cap();
+
+        json::JsonObject res_obj;
+        res_obj["host_cpu_cores"] = static_cast<int>(total_cpus);
+        res_obj["cpu_50_percent_cap"] = static_cast<int>(cpu_50_cap);
+        res_obj["host_total_memory_bytes"] = static_cast<double>(total_mem);
+        res_obj["memory_50_percent_cap_bytes"] = static_cast<double>(mem_50_cap);
+        obj["resource_limits"] = json::JsonValue(res_obj);
 
         json::JsonArray tasks_arr;
         for (const auto& t : orchestrator_->get_tasks()) {

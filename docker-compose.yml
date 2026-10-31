@@ -12,5 +12,22 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 2048M
+          cpus: "4.0"
+          memory: 3500M
+        reservations:
+          cpus: "1.0"
+          memory: 512M
+
+  lxace-tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lxace-tests
+    entrypoint: ["/usr/local/bin/lxace_tests"]
+    profiles:
+      - test
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 3500M
