@@ -74,6 +74,7 @@ set(TEST_SOURCES
     tests/test_http.cpp
     tests/test_version.cpp
     tests/test_cli.cpp
+    tests/test_tools.cpp
 )
 
 add_executable(lxace_tests
