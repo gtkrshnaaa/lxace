@@ -13,7 +13,8 @@ Engine::Engine(std::filesystem::path project_dir, int port)
     config_ = std::make_shared<ConfigManager>(config_file);
     event_bus_ = std::make_shared<EventBus>();
     ring_buffer_ = std::make_shared<RingBuffer<std::string>>(500);
-    orchestrator_ = std::make_shared<agent::Orchestrator>(event_bus_);
+    tool_registry_ = std::make_shared<tool::ToolRegistry>();
+    orchestrator_ = std::make_shared<agent::Orchestrator>(event_bus_, tool_registry_, project_dir_);
     sse_manager_ = std::make_shared<net::SseStreamManager>();
     http_router_ = std::make_shared<net::HttpRouter>();
     http_server_ = std::make_shared<net::HttpServer>(static_cast<uint16_t>(port_));
@@ -242,6 +243,29 @@ void Engine::register_api_routes() {
             return net::HttpResponse::json(500, "{\"error\": \"Failed to write file\"}");
         }
         return net::HttpResponse::json(200, "{\"status\": \"written\"}");
+    });
+
+    // GET /api/tools
+    http_router_->add_route(net::HttpMethod::Get, "/api/tools", [this](const net::HttpRequest&) {
+        auto schemas = tool_registry_->get_schemas();
+        return net::HttpResponse::json(200, json::JsonValue(schemas).serialize());
+    });
+
+    // POST /api/tools/execute
+    http_router_->add_route(net::HttpMethod::Post, "/api/tools/execute", [this](const net::HttpRequest& req) {
+        auto parsed = json::JsonParser::parse(req.body);
+        if (!parsed || !parsed->contains("tool") || !(*parsed)["tool"].is_string()) {
+            return net::HttpResponse::json(400, "{\"error\": \"Missing or invalid tool field\"}");
+        }
+        std::string tool_name = (*parsed)["tool"].as_string();
+        json::JsonObject args_obj;
+        if (parsed->contains("arguments") && (*parsed)["arguments"].is_object()) {
+            args_obj = (*parsed)["arguments"].as_object();
+        }
+
+        tool::ToolExecutionContext ctx{project_dir_, event_bus_};
+        auto result = tool_registry_->execute(tool_name, args_obj, ctx);
+        return net::HttpResponse::json(200, json::JsonValue(result.to_json()).serialize());
     });
 }
 

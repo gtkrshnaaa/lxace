@@ -3,8 +3,13 @@
 
 namespace lxace::agent {
 
-Orchestrator::Orchestrator(std::shared_ptr<core::EventBus> event_bus)
-    : event_bus_(std::move(event_bus)) {}
+Orchestrator::Orchestrator(
+    std::shared_ptr<core::EventBus> event_bus,
+    std::shared_ptr<tool::ToolRegistry> tool_registry,
+    std::filesystem::path project_dir
+) : event_bus_(std::move(event_bus)),
+    tool_registry_(std::move(tool_registry)),
+    project_dir_(std::move(project_dir)) {}
 
 Orchestrator::~Orchestrator() {
     stop_all();
@@ -61,7 +66,7 @@ std::string Orchestrator::submit_prompt(const std::string& prompt) {
         auto handle = std::make_unique<WorkerHandle>();
         handle->done = done_flag;
         handle->thread = std::thread([this, task_id, agent_name, done_flag]() {
-            SubAgent agent(agent_name, event_bus_);
+            SubAgent agent(agent_name, event_bus_, tool_registry_, project_dir_);
             Task local_task;
             {
                 std::lock_guard<std::mutex> lk(mutex_);

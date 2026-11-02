@@ -8,12 +8,19 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <filesystem>
+
+namespace lxace::tool { class ToolRegistry; }
 
 namespace lxace::agent {
 
 class Orchestrator {
 public:
-    explicit Orchestrator(std::shared_ptr<core::EventBus> event_bus);
+    explicit Orchestrator(
+        std::shared_ptr<core::EventBus> event_bus,
+        std::shared_ptr<tool::ToolRegistry> tool_registry = nullptr,
+        std::filesystem::path project_dir = ""
+    );
     ~Orchestrator();
 
     Orchestrator(const Orchestrator&) = delete;
@@ -34,6 +41,8 @@ private:
     void reap_finished_workers_locked();
 
     std::shared_ptr<core::EventBus> event_bus_;
+    std::shared_ptr<tool::ToolRegistry> tool_registry_;
+    std::filesystem::path project_dir_;
     mutable std::mutex mutex_;
     std::vector<Task> tasks_;
     std::atomic<bool> cancel_flag_{false};

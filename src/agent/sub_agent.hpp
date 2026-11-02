@@ -5,13 +5,17 @@
 #include <string>
 #include <memory>
 #include <atomic>
-#include <functional>
+#include <filesystem>
+
+namespace lxace::tool { class ToolRegistry; }
 
 namespace lxace::agent {
 
 class SubAgent {
 public:
-    SubAgent(std::string name, std::shared_ptr<core::EventBus> event_bus);
+    SubAgent(std::string name, std::shared_ptr<core::EventBus> event_bus,
+             std::shared_ptr<tool::ToolRegistry> tool_registry = nullptr,
+             std::filesystem::path project_dir = "");
     ~SubAgent() = default;
 
     SubAgent(const SubAgent&) = delete;
@@ -29,6 +33,8 @@ public:
 private:
     std::string name_;
     std::shared_ptr<core::EventBus> event_bus_;
+    std::shared_ptr<tool::ToolRegistry> tool_registry_;
+    std::filesystem::path project_dir_;
 };
 
 } // namespace lxace::agent

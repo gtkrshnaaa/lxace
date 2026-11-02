@@ -5,6 +5,7 @@
 #include "core/ring_buffer.hpp"
 #include "agent/orchestrator.hpp"
 #include "net/http_server.hpp"
+#include "tool/tool_registry.hpp"
 #include <string>
 #include <memory>
 #include <filesystem>
@@ -30,6 +31,7 @@ public:
     [[nodiscard]] std::shared_ptr<RingBuffer<std::string>> ring_buffer() const { return ring_buffer_; }
     [[nodiscard]] std::shared_ptr<agent::Orchestrator> orchestrator() const { return orchestrator_; }
     [[nodiscard]] std::shared_ptr<net::HttpServer> http_server() const { return http_server_; }
+    [[nodiscard]] std::shared_ptr<tool::ToolRegistry> tool_registry() const { return tool_registry_; }
 
     void submit_prompt(const std::string& prompt);
     void stop_all();
@@ -43,6 +45,7 @@ private:
     std::shared_ptr<EventBus> event_bus_;
     std::shared_ptr<RingBuffer<std::string>> ring_buffer_;
     std::shared_ptr<agent::Orchestrator> orchestrator_;
+    std::shared_ptr<tool::ToolRegistry> tool_registry_;
     std::shared_ptr<net::SseStreamManager> sse_manager_;
     std::shared_ptr<net::HttpRouter> http_router_;
     std::shared_ptr<net::HttpServer> http_server_;
