@@ -69,6 +69,8 @@ Common status codes:
 | `GET` | `/api/fs/list` | List directory contents within project boundary | Query param | 200, 403 |
 | `POST` | `/api/fs/read` | Read text file within project boundary | JSON | 200, 400, 403, 404 |
 | `POST` | `/api/fs/write` | Write or append file content within project boundary | JSON | 200, 400, 403, 500 |
+| `GET` | `/api/tools` | Discover registered AI tools, parameter schemas, and risk levels | None | 200 |
+| `POST` | `/api/tools/execute` | Execute native tool with argument validation and standardized envelope | JSON | 200, 400 |
 
 ---
 
@@ -588,6 +590,176 @@ curl -X POST http://127.0.0.1:8080/api/fs/write \
 curl -X POST http://127.0.0.1:8080/api/fs/write \
   -H "Content-Type: application/json" \
   -d '{"path": "test.txt", "content": "Second Line\n", "append": true}'
+```
+
+---
+
+### 3.11 GET `/api/tools`
+Retrieves the complete catalog of native tools registered inside the LXACE engine, including their descriptions, execution risk levels (`read-only`, `mutating`, `destructive`), and standardized JSON Schema definitions for input parameters.
+
+#### Request
+```http
+GET /api/tools HTTP/1.1
+Host: 127.0.0.1:8080
+```
+
+#### Response (`200 OK`)
+```json
+[
+  {
+    "name": "fs_view",
+    "description": "View contents of a file within the project boundary with line numbering and range windowing.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Relative path to file within workspace" },
+        "start_line": { "type": "integer", "description": "1-based starting line number (default: 1)" },
+        "end_line": { "type": "integer", "description": "1-based ending line number (default: start_line + 100)" },
+        "max_bytes": { "type": "integer", "description": "Maximum content bytes to return (default: 65536)" }
+      },
+      "required": ["path"]
+    }
+  },
+  {
+    "name": "fs_replace",
+    "description": "Surgically replace an exact target string block with replacement content in a file. Enforces unique matching by default to prevent accidental mutations.",
+    "risk_level": "mutating",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Relative path to target file within workspace" },
+        "target": { "type": "string", "description": "Exact text block to replace" },
+        "replacement": { "type": "string", "description": "Exact text block to insert" },
+        "allow_multiple": { "type": "boolean", "description": "Allow replacing multiple occurrences (default: false)" }
+      },
+      "required": ["path", "target", "replacement"]
+    }
+  },
+  {
+    "name": "fs_find",
+    "description": "Recursively find files in project workspace matching filename pattern or extension.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Relative directory path to search within (default: root)" },
+        "pattern": { "type": "string", "description": "Filename pattern or extension to match" },
+        "max_results": { "type": "integer", "description": "Maximum results to return (default: 100)" }
+      }
+    }
+  },
+  {
+    "name": "fs_grep",
+    "description": "Search for string or content pattern across text files in project workspace.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string", "description": "Substring pattern to search for" },
+        "path": { "type": "string", "description": "Relative directory path to search within (default: root)" },
+        "max_matches": { "type": "integer", "description": "Maximum matches to return (default: 50)" },
+        "case_sensitive": { "type": "boolean", "description": "Case-sensitive search (default: true)" }
+      },
+      "required": ["query"]
+    }
+  },
+  {
+    "name": "proc_execute",
+    "description": "Execute a command with timeout and resource limits within the project workspace.",
+    "risk_level": "mutating",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "description": "Command line string to execute" },
+        "timeout_ms": { "type": "integer", "description": "Timeout in milliseconds (default: 30000)" }
+      },
+      "required": ["command"]
+    }
+  },
+  {
+    "name": "sys_metrics",
+    "description": "Inspect host CPU cores, memory limits, and the active 50% resource cap.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  }
+]
+```
+
+#### Example Command
+```bash
+curl -X GET http://127.0.0.1:8080/api/tools
+```
+
+---
+
+### 3.12 POST `/api/tools/execute`
+Dispatches a tool execution request through the engine's tool registry. Performs automatic schema parameter validation, verifies workspace sandboxing, executes native system routines, and formats output into a standardized execution envelope.
+
+#### Request
+```http
+POST /api/tools/execute HTTP/1.1
+Host: 127.0.0.1:8080
+Content-Type: application/json
+
+{
+  "tool": "fs_view",
+  "arguments": {
+    "path": "src/main.cpp",
+    "start_line": 1,
+    "end_line": 30
+  }
+}
+```
+
+#### Request Schema
+- `tool` (string, required): Identifier of the registered tool to execute.
+- `arguments` (object, optional): Key-value arguments matching the tool's parameter schema.
+
+#### Response Schema (`200 OK`)
+```json
+{
+  "success": true,
+  "data": {
+    "path": "src/main.cpp",
+    "start_line": 1,
+    "end_line": 30,
+    "total_lines": 77,
+    "content": "    1 | #include \"core/engine.hpp\"\n...",
+    "truncated": false
+  },
+  "error": "",
+  "duration_ms": 1,
+  "truncated": false
+}
+```
+
+When a tool fails execution (e.g. missing required parameter, target not found in `fs_replace`, or path traversal outside project root), `success` is returned as `false` with the error description in `error`:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "Target string not found in src/main.cpp",
+  "duration_ms": 0,
+  "truncated": false
+}
+```
+
+#### Example Command
+```bash
+# View lines with numbers
+curl -X POST http://127.0.0.1:8080/api/tools/execute \
+  -H "Content-Type: application/json" \
+  -d '{"tool": "fs_view", "arguments": {"path": "README.md", "start_line": 1, "end_line": 20}}'
+
+# Surgically replace string in file
+curl -X POST http://127.0.0.1:8080/api/tools/execute \
+  -H "Content-Type: application/json" \
+  -d '{"tool": "fs_replace", "arguments": {"path": "sample.txt", "target": "old text", "replacement": "new text"}}'
 ```
 
 ---
