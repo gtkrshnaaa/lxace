@@ -46,6 +46,13 @@ set(CORE_SOURCES
     src/cli/view_settings.cpp
     src/cli/view_prompt.cpp
     src/cli/cli_app.cpp
+    src/tool/tool_registry.cpp
+    src/tool/tool_fs_view.cpp
+    src/tool/tool_fs_replace.cpp
+    src/tool/tool_fs_find.cpp
+    src/tool/tool_fs_grep.cpp
+    src/tool/tool_proc_execute.cpp
+    src/tool/tool_sys_metrics.cpp
 )
 
 # Main executable
