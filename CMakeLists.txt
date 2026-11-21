@@ -90,5 +90,14 @@ add_executable(lxace_tests
 target_include_directories(lxace_tests PRIVATE src tests)
 target_link_libraries(lxace_tests PRIVATE pthread)
 
+# Register the suite with CTest so `ctest` runs it instead of silently reporting no
+# tests. The binary exits non-zero on any failure, which is what CTest keys on.
+enable_testing()
+add_test(NAME lxace_suite COMMAND lxace_tests)
+set_tests_properties(lxace_suite PROPERTIES
+    TIMEOUT 300
+    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+)
+
 # Installation specification
 install(TARGETS lxace RUNTIME DESTINATION bin)
