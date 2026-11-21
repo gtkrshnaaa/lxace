@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <grp.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <csignal>
@@ -52,6 +53,28 @@ void apply_child_limits(const ResourceLimits& limits) {
     set_limit(RLIMIT_CPU, limits.max_cpu_seconds);
     set_limit(RLIMIT_FSIZE, limits.max_file_size_bytes);
     set_limit(RLIMIT_CORE, 0);
+}
+
+// Drops the child to an unprivileged identity before exec. Runs only when the caller
+// configured an explicit target id, so an unprivileged engine keeps its own identity.
+void apply_privilege_drop(const ResourceLimits& limits) {
+    if (limits.drop_uid == 0 && limits.drop_gid == 0) {
+        return;
+    }
+
+    // Order is mandatory: group credentials must change before the uid drop, because a
+    // successful setuid permanently removes the privilege required to alter groups.
+    if (limits.drop_gid != 0) {
+        if (setgroups(0, nullptr) != 0) _exit(126);
+        if (setgid(static_cast<gid_t>(limits.drop_gid)) != 0) _exit(126);
+    }
+
+    if (limits.drop_uid != 0) {
+        if (setuid(static_cast<uid_t>(limits.drop_uid)) != 0) _exit(126);
+        // A drop that silently failed would leave the command running as root. Refuse to
+        // exec if root privilege is still reachable.
+        if (setuid(0) == 0) _exit(126);
+    }
 }
 
 } // namespace
@@ -119,6 +142,10 @@ ProcessResult ProcessRunner::execute_args(
         // Bound the child before it can exhaust host resources. Applied after the
         // descriptor plumbing so the limits cannot block our own dup2 calls.
         apply_child_limits(limits);
+
+        // Drop privileges before touching the filesystem so neither chdir nor exec ever
+        // runs with elevated rights.
+        apply_privilege_drop(limits);
 
         if (!working_dir.empty()) {
             if (chdir(working_dir.c_str()) != 0) {

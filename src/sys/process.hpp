@@ -21,6 +21,12 @@ struct ResourceLimits {
     uint64_t max_cpu_seconds{60};
     // RLIMIT_FSIZE: caps a single file write so a runaway command cannot fill the disk.
     uint64_t max_file_size_bytes{512ULL * 1024ULL * 1024ULL};
+    // Privilege drop applied in the child before exec. Zero means "keep the current id",
+    // which is the only safe default when the engine itself runs unprivileged. Callers
+    // that run as root should set both to a dedicated service account so a compromised
+    // command cannot retain root capability.
+    uint32_t drop_uid{0};
+    uint32_t drop_gid{0};
 };
 
 struct ProcessResult {
