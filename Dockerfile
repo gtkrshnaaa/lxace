@@ -25,18 +25,21 @@ FROM ubuntu:24.04 AS runner
 
 # Match the invoking user's uid/gid so a bind-mounted workspace stays writable. A fixed
 # uid 10001 was shadowed by the bind mount, which made every fs_write fail at runtime.
+#
+# The base image already owns uid/gid 1000 (the stock `ubuntu` account), so creating a
+# named account at that id fails with groupadd exit 4. Running as a numeric uid instead
+# needs no passwd entry and never collides, while staying unprivileged.
 ARG APP_UID=1000
 ARG APP_GID=1000
-
-RUN groupadd --gid "${APP_GID}" appuser 2>/dev/null \
-    && useradd --uid "${APP_UID}" --gid "${APP_GID}" -m -s /bin/bash appuser
 
 WORKDIR /workspace
 COPY --from=builder /app/build/lxace /usr/local/bin/lxace
 COPY --from=builder /app/build/lxace_tests /usr/local/bin/lxace_tests
 
 RUN chown -R "${APP_UID}:${APP_GID}" /workspace
-USER appuser
+
+ENV HOME=/workspace
+USER ${APP_UID}:${APP_GID}
 
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/lxace"]
