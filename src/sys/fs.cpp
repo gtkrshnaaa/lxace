@@ -2,7 +2,10 @@
 #include <fstream>
 #include <sstream>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
+#include <cstdio>
 
 namespace lxace::sys {
 
@@ -23,13 +26,61 @@ bool FsEngine::write_file(const std::filesystem::path& path, const std::string& 
         std::filesystem::create_directories(parent, ec);
     }
 
-    std::ios_base::openmode mode = std::ios::binary | (append ? std::ios::app : std::ios::trunc);
-    std::ofstream file(path, mode);
-    if (!file.is_open()) {
+    if (append) {
+        std::ofstream file(path, std::ios::binary | std::ios::app);
+        if (!file.is_open()) {
+            return false;
+        }
+        file.write(content.data(), static_cast<std::streamsize>(content.size()));
+        file.flush();
+        return file.good();
+    }
+
+    // Write to a sibling temporary file, fsync it, then rename over the target. A crash
+    // mid-write can no longer leave a truncated file with the original destroyed.
+    std::filesystem::path temp_path = path;
+    temp_path += ".tmp.";
+    temp_path += std::to_string(static_cast<long long>(::getpid()));
+
+    const int fd = ::open(temp_path.c_str(),
+                          O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) {
         return false;
     }
-    file.write(content.data(), static_cast<std::streamsize>(content.size()));
-    return file.good();
+
+    size_t written = 0;
+    bool ok = true;
+    while (written < content.size()) {
+        const ssize_t n = ::write(fd, content.data() + written, content.size() - written);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            ok = false;
+            break;
+        }
+        written += static_cast<size_t>(n);
+    }
+
+    if (ok && ::fsync(fd) != 0) {
+        ok = false;
+    }
+    if (::close(fd) != 0) {
+        ok = false;
+    }
+
+    if (!ok) {
+        std::filesystem::remove(temp_path, ec);
+        return false;
+    }
+
+    std::filesystem::rename(temp_path, path, ec);
+    if (ec) {
+        std::error_code ignored;
+        std::filesystem::remove(temp_path, ignored);
+        return false;
+    }
+    return true;
 }
 
 bool FsEngine::exists(const std::filesystem::path& path) {
@@ -109,6 +160,26 @@ std::optional<std::filesystem::path> FsEngine::resolve_safe_path(const std::file
     if (ec) return std::nullopt;
 
     std::filesystem::path combined = target.is_absolute() ? target : (abs_base / target);
+
+    // Reject any symlink in the path from the base down to the final component. A
+    // dangling final symlink previously survived weakly_canonical, passed the prefix
+    // check, and then let ofstream write outside the sandbox through the link.
+    std::filesystem::path probe = abs_base;
+    const auto rel = combined.lexically_relative(abs_base);
+    if (rel.empty() && combined != abs_base) {
+        return std::nullopt;
+    }
+    for (const auto& part : rel) {
+        if (part == "." || part == "..") {
+            continue;
+        }
+        probe /= part;
+        struct stat st{};
+        if (::lstat(probe.c_str(), &st) == 0 && S_ISLNK(st.st_mode)) {
+            return std::nullopt;
+        }
+    }
+
     auto normalized = std::filesystem::weakly_canonical(combined, ec);
     if (ec) return std::nullopt;
 

@@ -21,11 +21,15 @@ public:
     Engine& operator=(const Engine&) = delete;
 
     bool initialize();
-    void start_services();
+    // Returns false when the API listener could not bind, so startup can fail loudly.
+    bool start_services();
     void stop_services();
 
     [[nodiscard]] const std::filesystem::path& project_dir() const { return project_dir_; }
     [[nodiscard]] int port() const { return port_; }
+    [[nodiscard]] std::string last_error() const { return last_error_; }
+    [[nodiscard]] const std::string& api_token() const { return api_token_; }
+    [[nodiscard]] const std::string& bind_address() const { return bind_address_; }
     [[nodiscard]] std::shared_ptr<ConfigManager> config() const { return config_; }
     [[nodiscard]] std::shared_ptr<EventBus> event_bus() const { return event_bus_; }
     [[nodiscard]] std::shared_ptr<RingBuffer<std::string>> ring_buffer() const { return ring_buffer_; }
@@ -38,9 +42,13 @@ public:
 
 private:
     void register_api_routes();
+    void configure_auth();
 
     std::filesystem::path project_dir_;
     int port_;
+    std::string bind_address_{"127.0.0.1"};
+    std::string api_token_;
+    std::string last_error_;
     std::shared_ptr<ConfigManager> config_;
     std::shared_ptr<EventBus> event_bus_;
     std::shared_ptr<RingBuffer<std::string>> ring_buffer_;

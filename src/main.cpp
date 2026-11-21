@@ -36,7 +36,19 @@ int main(int argc, char* argv[]) {
         if (arg == "--project-dir" && i + 1 < argc) {
             project_dir = argv[++i];
         } else if (arg == "--port" && i + 1 < argc) {
-            try { port = std::stoi(argv[++i]); } catch (...) {}
+            const std::string raw_port = argv[++i];
+            try {
+                const int parsed = std::stoi(raw_port);
+                if (parsed < 1 || parsed > 65535) {
+                    std::cerr << "Invalid --port value '" << raw_port
+                              << "': must be between 1 and 65535.\n";
+                    return 2;
+                }
+                port = parsed;
+            } catch (...) {
+                std::cerr << "Invalid --port value '" << raw_port << "': not a number.\n";
+                return 2;
+            }
         } else if (arg == "--headless") {
             headless = true;
         } else if (arg == "--version" || arg == "-v" || arg == "-V") {
@@ -60,10 +72,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    engine->start_services();
+    if (!engine->start_services()) {
+        std::cerr << "Failed to start LXACE API server on " << engine->bind_address() << ":"
+                  << port << ": " << engine->last_error() << "\n";
+        return 1;
+    }
 
     if (headless) {
-        std::cout << "LXACE running in headless mode on port " << port << " for project: " << project_dir << "\n";
+        std::cout << "LXACE running in headless mode on " << engine->bind_address() << ":" << port
+                  << " for project: " << project_dir << "\n";
+        if (!engine->api_token().empty()) {
+            std::cout << "API bearer token: " << engine->api_token() << "\n";
+        }
         while (!g_shutdown_requested) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }

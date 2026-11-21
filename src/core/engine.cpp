@@ -1,9 +1,14 @@
 #include "core/engine.hpp"
 #include "json/json_value.hpp"
 #include "json/json_parser.hpp"
+#include "net/http_auth.hpp"
 #include "sys/fs.hpp"
 #include "sys/process.hpp"
 #include "sys/procfs.hpp"
+#include <cmath>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 namespace lxace::core {
 
@@ -34,6 +39,7 @@ bool Engine::initialize() {
         }
     });
 
+    configure_auth();
     register_api_routes();
     http_server_->set_router(http_router_);
     http_server_->set_sse_manager(sse_manager_);
@@ -41,8 +47,51 @@ bool Engine::initialize() {
     return true;
 }
 
-void Engine::start_services() {
-    http_server_->start();
+void Engine::configure_auth() {
+    // Remote exposure is opt-in via LXACE_BIND. Loopback stays the default so a
+    // freshly built binary is never reachable from the network by accident.
+    if (const char* bind = std::getenv("LXACE_BIND"); bind != nullptr && bind[0] != '\0') {
+        bind_address_ = bind;
+    }
+
+    api_token_ = net::HttpAuth::resolve_token((project_dir_ / ".lxace" / "api_token").string());
+
+    net::AuthPolicy policy;
+    const bool remote = bind_address_ != "127.0.0.1" && bind_address_ != "localhost";
+    // A non-loopback bind always requires a token. Loopback also requires one unless
+    // LXACE_ALLOW_UNAUTHENTICATED=1 is explicitly set for local tooling.
+    const bool allow_local_anon = []() {
+        const char* v = std::getenv("LXACE_ALLOW_UNAUTHENTICATED");
+        return v != nullptr && std::string(v) == "1";
+    }();
+
+    policy.require_token = remote || (!allow_local_anon && !api_token_.empty());
+    policy.bearer_token = api_token_;
+
+    if (const char* origins = std::getenv("LXACE_ALLOWED_ORIGINS"); origins != nullptr && origins[0] != '\0') {
+        std::string list(origins);
+        size_t start = 0;
+        while (start <= list.size()) {
+            const auto comma = list.find(',', start);
+            const auto token = list.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+            if (!token.empty()) {
+                policy.extra_origins.push_back(token);
+            }
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+    }
+
+    http_server_->set_bind_address(bind_address_);
+    http_router_->set_auth_policy(std::move(policy));
+}
+
+bool Engine::start_services() {
+    if (!http_server_->start()) {
+        last_error_ = http_server_->last_error();
+        return false;
+    }
+    return true;
 }
 
 void Engine::stop_services() {
@@ -76,7 +125,6 @@ void Engine::register_api_routes() {
         json::JsonObject obj;
         obj["project_dir"] = project_dir_.string();
         obj["model"] = config_->get().model;
-        obj["base_url"] = config_->get().base_url;
         obj["base_url_masked"] = config_->masked_base_url();
         obj["api_key_masked"] = config_->masked_api_key();
 
@@ -131,7 +179,8 @@ void Engine::register_api_routes() {
     http_router_->add_route(net::HttpMethod::Get, "/api/settings", [this](const net::HttpRequest&) {
         auto conf = config_->get();
         json::JsonObject obj;
-        obj["base_url"] = conf.base_url;
+        // Only the masked form is returned. Echoing the raw value made the mask cosmetic
+        // and exposed any credentials embedded in the URL.
         obj["base_url_masked"] = config_->masked_base_url();
         obj["api_key_masked"] = config_->masked_api_key();
         obj["model"] = conf.model;
@@ -147,12 +196,52 @@ void Engine::register_api_routes() {
         if (!parsed) {
             return net::HttpResponse::json(400, "{\"error\": \"Invalid JSON\"}");
         }
+
         auto conf = config_->get();
+        std::vector<std::string> rejected;
+
         if (parsed->contains("base_url")) conf.base_url = (*parsed)["base_url"].as_string();
         if (parsed->contains("api_key")) conf.api_key = (*parsed)["api_key"].as_string();
         if (parsed->contains("model")) conf.model = (*parsed)["model"].as_string();
-        if (parsed->contains("max_tokens")) conf.max_tokens = static_cast<int>((*parsed)["max_tokens"].as_int());
-        if (parsed->contains("temperature")) conf.temperature = (*parsed)["temperature"].as_double();
+
+        if (parsed->contains("max_tokens")) {
+            const double v = (*parsed)["max_tokens"].as_double();
+            if (!std::isfinite(v) || v < 1.0 || v > 1000000.0) {
+                rejected.push_back("max_tokens must be between 1 and 1000000");
+            } else {
+                conf.max_tokens = static_cast<int>(v);
+            }
+        }
+
+        if (parsed->contains("temperature")) {
+            const double v = (*parsed)["temperature"].as_double();
+            if (!std::isfinite(v) || v < 0.0 || v > 2.0) {
+                rejected.push_back("temperature must be between 0 and 2");
+            } else {
+                conf.temperature = v;
+            }
+        }
+
+        if (parsed->contains("server_port")) {
+            // Accepted by the old API but never rebound the listener, so the UI reported
+            // a port that was not in use. Reject it explicitly instead of lying.
+            const double v = (*parsed)["server_port"].as_double();
+            if (!std::isfinite(v) || v < 1.0 || v > 65535.0) {
+                rejected.push_back("server_port must be between 1 and 65535");
+            } else if (static_cast<int>(v) != port_) {
+                rejected.push_back("server_port cannot be changed at runtime; restart with --port");
+            }
+        }
+
+        if (!rejected.empty()) {
+            json::JsonObject err;
+            json::JsonArray reasons;
+            for (const auto& r : rejected) reasons.push_back(json::JsonValue(r));
+            err["error"] = "Invalid settings";
+            err["reasons"] = json::JsonValue(reasons);
+            return net::HttpResponse::json(400, json::JsonValue(err).serialize());
+        }
+
         config_->update(conf);
         return net::HttpResponse::json(200, "{\"status\": \"updated\"}");
     });
@@ -171,6 +260,8 @@ void Engine::register_api_routes() {
         res["stdout"] = result.stdout_output;
         res["stderr"] = result.stderr_output;
         res["timed_out"] = result.timed_out;
+        res["truncated_stdout"] = result.truncated_stdout;
+        res["truncated_stderr"] = result.truncated_stderr;
         res["duration_ms"] = result.duration_ms;
         return net::HttpResponse::json(200, json::JsonValue(res).serialize());
     });

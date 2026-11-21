@@ -50,7 +50,11 @@ void JsonWriter::write_value(const JsonValue& value, std::string& out, bool pret
             break;
         case JsonType::Number: {
             double d = value.as_double();
-            if (std::floor(d) == d && std::abs(d) < 1e15) {
+            if (!std::isfinite(d)) {
+                // JSON has no representation for nan or infinity. Emitting a bare token
+                // produced output no conforming parser could ever read back.
+                out.append("null");
+            } else if (std::floor(d) == d && std::abs(d) < 1e15) {
                 out.append(std::to_string(static_cast<int64_t>(d)));
             } else {
                 std::ostringstream ss;

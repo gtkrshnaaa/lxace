@@ -1,8 +1,32 @@
 #include "json/json_parser.hpp"
 #include <cctype>
 #include <charconv>
+#include <cmath>
 
 namespace lxace::json {
+
+namespace {
+
+// Encodes a Unicode scalar value as UTF-8. Lone surrogates are rejected upstream.
+void append_utf8(std::string& out, uint32_t cp) {
+    if (cp <= 0x7F) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp <= 0x7FF) {
+        out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp <= 0xFFFF) {
+        out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp <= 0x10FFFF) {
+        out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+}
+
+} // namespace
 
 JsonParser::JsonParser(std::string_view input) : input_(input) {}
 
@@ -101,9 +125,10 @@ std::optional<JsonValue> JsonParser::parse_number() {
     std::string_view num_str = input_.substr(start, pos_ - start);
     double val = 0.0;
     auto [ptr, ec] = std::from_chars(num_str.data(), num_str.data() + num_str.size(), val);
-    if (ec == std::errc()) {
+    if (ec == std::errc() && std::isfinite(val)) {
         return JsonValue(val);
     }
+    // Non-finite values are not valid JSON and would poison every later serialization.
     return std::nullopt;
 }
 
@@ -127,9 +152,40 @@ std::optional<std::string> JsonParser::parse_string_raw() {
                 case 't': result.push_back('\t'); break;
                 case 'u': {
                     if (pos_ + 4 > input_.size()) return std::nullopt;
-                    // simplified unicode skip / ascii conversion
-                    pos_ += 4;
-                    result.push_back('?');
+                    uint32_t code_point = 0;
+                    for (int i = 0; i < 4; ++i) {
+                        const char h = input_[pos_++];
+                        uint32_t digit = 0;
+                        if (h >= '0' && h <= '9') digit = static_cast<uint32_t>(h - '0');
+                        else if (h >= 'a' && h <= 'f') digit = static_cast<uint32_t>(h - 'a' + 10);
+                        else if (h >= 'A' && h <= 'F') digit = static_cast<uint32_t>(h - 'A' + 10);
+                        else return std::nullopt;
+                        code_point = (code_point << 4) | digit;
+                    }
+
+                    // Surrogate pair: a high surrogate must be followed by \uDC00-\uDFFF.
+                    if (code_point >= 0xD800 && code_point <= 0xDBFF) {
+                        if (pos_ + 6 > input_.size() || input_[pos_] != '\\' || input_[pos_ + 1] != 'u') {
+                            return std::nullopt;
+                        }
+                        pos_ += 2;
+                        uint32_t low = 0;
+                        for (int i = 0; i < 4; ++i) {
+                            const char h = input_[pos_++];
+                            uint32_t digit = 0;
+                            if (h >= '0' && h <= '9') digit = static_cast<uint32_t>(h - '0');
+                            else if (h >= 'a' && h <= 'f') digit = static_cast<uint32_t>(h - 'a' + 10);
+                            else if (h >= 'A' && h <= 'F') digit = static_cast<uint32_t>(h - 'A' + 10);
+                            else return std::nullopt;
+                            low = (low << 4) | digit;
+                        }
+                        if (low < 0xDC00 || low > 0xDFFF) return std::nullopt;
+                        code_point = 0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00);
+                    } else if (code_point >= 0xDC00 && code_point <= 0xDFFF) {
+                        return std::nullopt;
+                    }
+
+                    append_utf8(result, code_point);
                     break;
                 }
                 default: result.push_back(esc); break;

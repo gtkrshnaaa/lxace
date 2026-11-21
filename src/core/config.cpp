@@ -1,6 +1,13 @@
 #include "core/config.hpp"
+#include "json/json_parser.hpp"
+#include "json/json_writer.hpp"
 #include <fstream>
 #include <sstream>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cmath>
 
 namespace lxace::core {
 
@@ -117,9 +124,50 @@ bool ConfigManager::load_from_file(const std::filesystem::path& path) {
     if (!file.is_open()) {
         return false;
     }
-    // Simple key-value / json fallback loader
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    const std::string raw = buffer.str();
+
+    // Parse as real JSON first. The previous line-based loader split on the first colon,
+    // so any URL was truncated at "https:" and every later field silently reset.
+    if (auto parsed = json::JsonParser::parse(raw); parsed && parsed->is_object()) {
+        const auto& obj = parsed->as_object();
+        auto read_str = [&obj](const char* key, std::string& out) {
+            auto it = obj.find(key);
+            if (it != obj.end() && it->second.is_string()) {
+                out = it->second.as_string();
+            }
+        };
+        read_str("base_url", data_.base_url);
+        read_str("api_key", data_.api_key);
+        read_str("model", data_.model);
+
+        if (auto it = obj.find("max_tokens"); it != obj.end() && it->second.is_number()) {
+            const double v = it->second.as_double();
+            if (std::isfinite(v) && v >= 1.0 && v <= 1000000.0) {
+                data_.max_tokens = static_cast<int>(v);
+            }
+        }
+        if (auto it = obj.find("temperature"); it != obj.end() && it->second.is_number()) {
+            const double v = it->second.as_double();
+            if (std::isfinite(v) && v >= 0.0 && v <= 2.0) {
+                data_.temperature = v;
+            }
+        }
+        if (auto it = obj.find("server_port"); it != obj.end() && it->second.is_number()) {
+            const double v = it->second.as_double();
+            if (std::isfinite(v) && v >= 1.0 && v <= 65535.0) {
+                data_.server_port = static_cast<int>(v);
+            }
+        }
+        return true;
+    }
+
+    // Legacy key: value format, only for files written before JSON serialization.
+    std::istringstream stream(raw);
     std::string line;
-    while (std::getline(file, line)) {
+    while (std::getline(stream, line)) {
         auto colon = line.find(':');
         if (colon == std::string::npos) continue;
         std::string key = line.substr(0, colon);
@@ -141,7 +189,12 @@ bool ConfigManager::load_from_file(const std::filesystem::path& path) {
             try { data_.max_tokens = std::stoi(val); } catch (...) {}
         }
         else if (key == "temperature") {
-            try { data_.temperature = std::stod(val); } catch (...) {}
+            try {
+                const double parsed_temp = std::stod(val);
+                if (std::isfinite(parsed_temp) && parsed_temp >= 0.0 && parsed_temp <= 2.0) {
+                    data_.temperature = parsed_temp;
+                }
+            } catch (...) {}
         }
         else if (key == "server_port") {
             try { data_.server_port = std::stoi(val); } catch (...) {}
@@ -157,19 +210,62 @@ bool ConfigManager::save_to_file(const std::filesystem::path& path) const {
         std::filesystem::create_directories(parent, ec);
     }
 
-    std::ofstream file(path);
-    if (!file.is_open()) {
+    // Serialize with real JSON escaping. Raw concatenation turned any quote inside
+    // api_key or base_url into a file the loader could never read back.
+    json::JsonObject obj;
+    obj["base_url"] = data_.base_url;
+    obj["api_key"] = data_.api_key;
+    obj["model"] = data_.model;
+    obj["max_tokens"] = static_cast<int64_t>(data_.max_tokens);
+    obj["temperature"] = data_.temperature;
+    obj["server_port"] = static_cast<int64_t>(data_.server_port);
+    const std::string payload = json::JsonWriter::write(json::JsonValue(obj), true) + "\n";
+
+    // Same-directory temporary file, private mode from creation, fsync then rename.
+    std::filesystem::path temp_path = path;
+    temp_path += ".tmp.";
+    temp_path += std::to_string(static_cast<long long>(::getpid()));
+
+    const int fd = ::open(temp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
         return false;
     }
 
-    file << "{\n"
-         << "  \"base_url\": \"" << data_.base_url << "\",\n"
-         << "  \"api_key\": \"" << data_.api_key << "\",\n"
-         << "  \"model\": \"" << data_.model << "\",\n"
-         << "  \"max_tokens\": " << data_.max_tokens << ",\n"
-         << "  \"temperature\": " << data_.temperature << ",\n"
-         << "  \"server_port\": " << data_.server_port << "\n"
-         << "}\n";
+    size_t written = 0;
+    bool ok = true;
+    while (written < payload.size()) {
+        const ssize_t n = ::write(fd, payload.data() + written, payload.size() - written);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            ok = false;
+            break;
+        }
+        written += static_cast<size_t>(n);
+    }
+
+    if (ok && ::fsync(fd) != 0) {
+        ok = false;
+    }
+    if (::close(fd) != 0) {
+        ok = false;
+    }
+
+    if (!ok) {
+        std::filesystem::remove(temp_path, ec);
+        return false;
+    }
+
+    // Explicitly enforce 0600 in case an existing file had wider permissions.
+    ::chmod(temp_path.c_str(), 0600);
+
+    std::filesystem::rename(temp_path, path, ec);
+    if (ec) {
+        std::error_code ignored;
+        std::filesystem::remove(temp_path, ignored);
+        return false;
+    }
     return true;
 }
 
