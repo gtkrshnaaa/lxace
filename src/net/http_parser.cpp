@@ -4,14 +4,49 @@
 
 namespace lxace::net {
 
+namespace {
+
+int hex_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// Percent-decodes a query component. Malformed escapes are left verbatim rather than
+// silently dropped, so callers see the same bytes the client sent.
+std::string percent_decode(std::string_view in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size()) {
+            const int hi = hex_value(in[i + 1]);
+            const int lo = hex_value(in[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back(static_cast<char>((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        if (in[i] == '+') {
+            out.push_back(' ');
+            continue;
+        }
+        out.push_back(in[i]);
+    }
+    return out;
+}
+
+} // namespace
+
 void HttpParser::parse_url(std::string_view url, HttpRequest& req) {
     auto q_pos = url.find('?');
     if (q_pos == std::string_view::npos) {
-        req.path = std::string(url);
+        req.path = percent_decode(url);
         return;
     }
 
-    req.path = std::string(url.substr(0, q_pos));
+    req.path = percent_decode(url.substr(0, q_pos));
     req.query_string = std::string(url.substr(q_pos + 1));
 
     std::string_view remaining = req.query_string;
@@ -26,11 +61,11 @@ void HttpParser::parse_url(std::string_view url, HttpRequest& req) {
 
         auto eq_pos = pair.find('=');
         if (eq_pos != std::string_view::npos) {
-            std::string key = std::string(pair.substr(0, eq_pos));
-            std::string val = std::string(pair.substr(eq_pos + 1));
+            std::string key = percent_decode(pair.substr(0, eq_pos));
+            std::string val = percent_decode(pair.substr(eq_pos + 1));
             req.query_params[key] = val;
         } else if (!pair.empty()) {
-            req.query_params[std::string(pair)] = "";
+            req.query_params[percent_decode(pair)] = "";
         }
     }
 }

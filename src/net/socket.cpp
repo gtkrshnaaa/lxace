@@ -21,7 +21,7 @@ void ServerSocket::close_socket() {
     }
 }
 
-bool ServerSocket::bind_and_listen(uint16_t port, int backlog) {
+bool ServerSocket::bind_and_listen(uint16_t port, int backlog, const std::string& bind_address) {
     close_socket();
 
     fd_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
@@ -32,7 +32,14 @@ bool ServerSocket::bind_and_listen(uint16_t port, int backlog) {
 
     struct sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (bind_address.empty() || bind_address == "127.0.0.1" || bind_address == "localhost") {
+        addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    } else if (bind_address == "0.0.0.0" || bind_address == "*") {
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    } else if (inet_pton(AF_INET, bind_address.c_str(), &addr.sin_addr) != 1) {
+        close_socket();
+        return false;
+    }
     addr.sin_port = htons(port);
 
     if (bind(fd_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {

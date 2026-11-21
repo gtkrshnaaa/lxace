@@ -69,14 +69,48 @@ struct HttpResponse {
     std::map<std::string, std::string> headers;
     std::string body;
 
+    [[nodiscard]] static std::string reason_phrase(int status) {
+        switch (status) {
+            case 100: return "Continue";
+            case 101: return "Switching Protocols";
+            case 200: return "OK";
+            case 201: return "Created";
+            case 202: return "Accepted";
+            case 204: return "No Content";
+            case 301: return "Moved Permanently";
+            case 302: return "Found";
+            case 304: return "Not Modified";
+            case 400: return "Bad Request";
+            case 401: return "Unauthorized";
+            case 403: return "Forbidden";
+            case 404: return "Not Found";
+            case 405: return "Method Not Allowed";
+            case 408: return "Request Timeout";
+            case 409: return "Conflict";
+            case 413: return "Payload Too Large";
+            case 415: return "Unsupported Media Type";
+            case 422: return "Unprocessable Entity";
+            case 429: return "Too Many Requests";
+            case 500: return "Internal Server Error";
+            case 501: return "Not Implemented";
+            case 502: return "Bad Gateway";
+            case 503: return "Service Unavailable";
+            case 504: return "Gateway Timeout";
+            default: break;
+        }
+        if (status >= 100 && status < 200) return "Informational";
+        if (status >= 200 && status < 300) return "Success";
+        if (status >= 300 && status < 400) return "Redirection";
+        if (status >= 400 && status < 500) return "Client Error";
+        if (status >= 500 && status < 600) return "Server Error";
+        return "Unknown";
+    }
+
     static HttpResponse json(int status, const std::string& json_payload) {
         HttpResponse res;
         res.status_code = status;
-        res.status_text = (status == 200) ? "OK" : (status == 404 ? "Not Found" : "Error");
+        res.status_text = reason_phrase(status);
         res.headers["Content-Type"] = "application/json";
-        res.headers["Access-Control-Allow-Origin"] = "*";
-        res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
-        res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
         res.body = json_payload;
         return res;
     }
@@ -84,9 +118,8 @@ struct HttpResponse {
     static HttpResponse ok(const std::string& body, const std::string& content_type = "text/plain") {
         HttpResponse res;
         res.status_code = 200;
-        res.status_text = "OK";
+        res.status_text = reason_phrase(200);
         res.headers["Content-Type"] = content_type;
-        res.headers["Access-Control-Allow-Origin"] = "*";
         res.body = body;
         return res;
     }
@@ -94,7 +127,8 @@ struct HttpResponse {
     [[nodiscard]] std::string to_http_string() const {
         std::string out = "HTTP/1.1 " + std::to_string(status_code) + " " + status_text + "\r\n";
         auto h = headers;
-        if (h.find("Content-Length") == h.end() && !body.empty()) {
+        // HTTP/1.1 requires a length on every response so strict clients never block.
+        if (h.find("Content-Length") == h.end() && h.find("Transfer-Encoding") == h.end()) {
             h["Content-Length"] = std::to_string(body.size());
         }
         if (h.find("Connection") == h.end()) {

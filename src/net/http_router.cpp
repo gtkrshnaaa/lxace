@@ -6,29 +6,51 @@ void HttpRouter::add_route(HttpMethod method, const std::string& path, RouteHand
     exact_routes_[{method, path}] = std::move(handler);
 }
 
+bool HttpRouter::is_public(const std::string& path) const {
+    return public_paths_.find(path) != public_paths_.end();
+}
+
 HttpResponse HttpRouter::route(const HttpRequest& req) const {
     if (req.method == HttpMethod::Options) {
+        const std::string origin = req.get_header("Origin");
+
+        // Preflight is answered only for origins the policy allows. A wildcard is never
+        // returned, and an unlisted origin learns nothing about the allowed methods.
+        if (!auth_policy_.allows_origin(origin)) {
+            HttpResponse denied = HttpResponse::json(403, "{\"error\": \"Origin not allowed\"}");
+            return denied;
+        }
+
         HttpResponse res;
         res.status_code = 204;
-        res.status_text = "No Content";
-        res.headers["Access-Control-Allow-Origin"] = "*";
-        res.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+        res.status_text = HttpResponse::reason_phrase(204);
+        res.headers["Access-Control-Allow-Origin"] = origin;
+        res.headers["Vary"] = "Origin";
+        res.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS";
         res.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization";
+        res.headers["Access-Control-Max-Age"] = "600";
         return res;
+    }
+
+    if (auth_policy_.require_token && !is_public(req.path)) {
+        int auth_status = 200;
+        if (!HttpAuth::authorize(req, auth_policy_, auth_status)) {
+            HttpResponse denied = HttpResponse::json(auth_status, "{\"error\": \"Unauthorized\"}");
+            denied.headers["WWW-Authenticate"] = "Bearer realm=\"lxace\"";
+            HttpAuth::apply_cors(req, auth_policy_, denied);
+            return denied;
+        }
     }
 
     auto it = exact_routes_.find({req.method, req.path});
     if (it != exact_routes_.end() && it->second) {
-        return it->second(req);
+        HttpResponse res = it->second(req);
+        HttpAuth::apply_cors(req, auth_policy_, res);
+        return res;
     }
 
-    // Fallback 404
-    HttpResponse not_found;
-    not_found.status_code = 404;
-    not_found.status_text = "Not Found";
-    not_found.headers["Content-Type"] = "application/json";
-    not_found.headers["Access-Control-Allow-Origin"] = "*";
-    not_found.body = "{\"error\": \"Route not found\"}";
+    HttpResponse not_found = HttpResponse::json(404, "{\"error\": \"Route not found\"}");
+    HttpAuth::apply_cors(req, auth_policy_, not_found);
     return not_found;
 }
 

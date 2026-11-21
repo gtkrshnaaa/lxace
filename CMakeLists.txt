@@ -35,6 +35,9 @@ set(CORE_SOURCES
     src/json/json_writer.cpp
     src/net/socket.cpp
     src/net/epoll_reactor.cpp
+    src/net/http_auth.cpp
+    src/net/auth_token.cpp
+    src/net/request_reader.cpp
     src/net/http_parser.cpp
     src/net/http_router.cpp
     src/net/sse_stream.cpp

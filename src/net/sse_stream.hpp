@@ -20,6 +20,9 @@ public:
     void broadcast(const core::Event& event);
     void broadcast_raw(const std::string& data);
 
+    // Drops descriptors whose peer has hung up. Safe to call from any thread.
+    size_t reap_disconnected();
+
     [[nodiscard]] size_t client_count() const;
 
 private:

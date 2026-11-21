@@ -1,10 +1,16 @@
 #include "net/http_server.hpp"
 #include "net/http_parser.hpp"
+#include "net/request_reader.hpp"
 #include <unistd.h>
 #include <sys/socket.h>
+#include <chrono>
 #include <vector>
 
 namespace lxace::net {
+
+namespace {
+constexpr size_t kWorkerCount = 4;
+} // namespace
 
 HttpServer::HttpServer(uint16_t port) : port_(port) {
     router_ = std::make_shared<HttpRouter>();
@@ -23,31 +29,87 @@ void HttpServer::set_sse_manager(std::shared_ptr<SseStreamManager> sse_manager) 
     sse_manager_ = std::move(sse_manager);
 }
 
+std::string HttpServer::last_error() const {
+    std::lock_guard<std::mutex> lock(error_mutex_);
+    return last_error_;
+}
+
 bool HttpServer::start() {
     if (running_) return true;
 
-    if (!server_socket_.bind_and_listen(port_)) {
+    if (!server_socket_.bind_and_listen(port_, 128, bind_address_)) {
+        std::lock_guard<std::mutex> lock(error_mutex_);
+        last_error_ = "failed to bind " + bind_address_ + ":" + std::to_string(port_);
         return false;
     }
 
     reactor_ = std::make_unique<EpollReactor>(128);
     if (!reactor_->is_valid() || !reactor_->add_fd(server_socket_.fd(), EPOLLIN)) {
         server_socket_.close_socket();
+        std::lock_guard<std::mutex> lock(error_mutex_);
+        last_error_ = "failed to register listener with epoll";
         return false;
     }
 
     running_ = true;
+
+    // A fixed worker pool keeps long-running requests off the acceptance thread, so a
+    // slow /api/exec can no longer starve /api/stop or the SSE stream.
+    workers_.reserve(kWorkerCount);
+    for (size_t i = 0; i < kWorkerCount; ++i) {
+        workers_.emplace_back(&HttpServer::worker_loop, this);
+    }
+
     server_thread_ = std::thread(&HttpServer::server_loop, this);
     return true;
 }
 
 void HttpServer::stop() {
-    if (!running_) return;
-    running_ = false;
+    if (!running_.exchange(false)) {
+        return;
+    }
 
     server_socket_.close_socket();
+    queue_cv_.notify_all();
+
     if (server_thread_.joinable()) {
         server_thread_.join();
+    }
+    join_workers();
+}
+
+void HttpServer::join_workers() {
+    for (auto& w : workers_) {
+        if (w.joinable()) {
+            w.join();
+        }
+    }
+    workers_.clear();
+}
+
+void HttpServer::enqueue(int client_fd) {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        pending_clients_.push_back(client_fd);
+    }
+    queue_cv_.notify_one();
+}
+
+void HttpServer::worker_loop() {
+    for (;;) {
+        int client_fd = -1;
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex_);
+            queue_cv_.wait(lock, [this]() { return !running_ || !pending_clients_.empty(); });
+            if (!running_ && pending_clients_.empty()) {
+                return;
+            }
+            client_fd = pending_clients_.front();
+            pending_clients_.pop_front();
+        }
+        if (client_fd >= 0) {
+            handle_client(client_fd);
+        }
     }
 }
 
@@ -60,14 +122,20 @@ void HttpServer::server_loop() {
 
         for (const auto& ev : events) {
             if (ev.data.fd == server_socket_.fd()) {
-                // Incoming client connection
                 int client_fd = server_socket_.accept_client();
                 if (client_fd >= 0) {
-                    handle_client(client_fd);
+                    enqueue(client_fd);
                 }
             }
         }
     }
+
+    // Drain descriptors accepted during shutdown so none is leaked.
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    for (int fd : pending_clients_) {
+        close(fd);
+    }
+    pending_clients_.clear();
 }
 
 void HttpServer::handle_client(int client_fd) {
@@ -77,43 +145,7 @@ void HttpServer::handle_client(int client_fd) {
     setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-    std::string raw_buffer;
-    char chunk[4096];
-    constexpr size_t MAX_REQUEST_SIZE = 10 * 1024 * 1024; // 10MB
-
-    while (raw_buffer.size() < MAX_REQUEST_SIZE) {
-        ssize_t bytes_read = recv(client_fd, chunk, sizeof(chunk), 0);
-        if (bytes_read > 0) {
-            raw_buffer.append(chunk, static_cast<size_t>(bytes_read));
-            // Check if we have complete headers
-            auto header_end = raw_buffer.find("\r\n\r\n");
-            if (header_end != std::string::npos) {
-                // Check content length
-                auto cl_pos = raw_buffer.find("Content-Length:");
-                if (cl_pos == std::string::npos) {
-                    cl_pos = raw_buffer.find("content-length:");
-                }
-                if (cl_pos != std::string::npos && cl_pos < header_end) {
-                    size_t val_start = cl_pos + 15;
-                    size_t val_end = raw_buffer.find("\r\n", val_start);
-                    if (val_end != std::string::npos) {
-                        try {
-                            size_t content_len = std::stoul(raw_buffer.substr(val_start, val_end - val_start));
-                            if (raw_buffer.size() >= header_end + 4 + content_len) {
-                                break;
-                            }
-                        } catch (...) {
-                            break;
-                        }
-                    }
-                } else {
-                    break;
-                }
-            }
-        } else {
-            break;
-        }
-    }
+    const std::string raw_buffer = RequestReader::read_request(client_fd);
 
     if (raw_buffer.empty()) {
         close(client_fd);
@@ -122,10 +154,7 @@ void HttpServer::handle_client(int client_fd) {
 
     auto req = HttpParser::parse(raw_buffer);
     if (!req) {
-        HttpResponse bad_req;
-        bad_req.status_code = 400;
-        bad_req.status_text = "Bad Request";
-        bad_req.body = "{\"error\": \"Malformed HTTP request\"}";
+        auto bad_req = HttpResponse::json(400, "{\"error\": \"Malformed HTTP request\"}");
         std::string res_str = bad_req.to_http_string();
         send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
         close(client_fd);
@@ -146,8 +175,7 @@ void HttpServer::handle_client(int client_fd) {
     if (router_) {
         res = router_->route(*req);
     } else {
-        res.status_code = 500;
-        res.status_text = "Internal Server Error";
+        res = HttpResponse::json(500, "{\"error\": \"No router configured\"}");
     }
 
     std::string res_str = res.to_http_string();
