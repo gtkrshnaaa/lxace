@@ -23,13 +23,19 @@ COPY --from=builder /app/build/lxace_tests /lxace_tests
 # Production runtime stage
 FROM ubuntu:24.04 AS runner
 
-RUN useradd -m -u 10001 -s /bin/bash appuser
+# Match the invoking user's uid/gid so a bind-mounted workspace stays writable. A fixed
+# uid 10001 was shadowed by the bind mount, which made every fs_write fail at runtime.
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+RUN groupadd --gid "${APP_GID}" appuser 2>/dev/null \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" -m -s /bin/bash appuser
 
 WORKDIR /workspace
 COPY --from=builder /app/build/lxace /usr/local/bin/lxace
 COPY --from=builder /app/build/lxace_tests /usr/local/bin/lxace_tests
 
-RUN chown -R appuser:appuser /workspace
+RUN chown -R "${APP_UID}:${APP_GID}" /workspace
 USER appuser
 
 EXPOSE 8080

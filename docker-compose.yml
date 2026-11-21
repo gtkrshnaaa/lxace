@@ -12,11 +12,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 3500M
+          # Derived from the host by scripts/sh/derive-caps.sh, so the 50% policy holds on
+          # any machine instead of only on an 8-core / 7GB workstation.
+          cpus: "${DOCKER_CPUS:-2.0}"
+          memory: "${DOCKER_MEM:-3500M}"
         reservations:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "0.5"
+          memory: "256M"
 
   lxace-tests:
     build:
@@ -29,5 +31,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 3500M
+          cpus: "${DOCKER_CPUS:-2.0}"
+          memory: "${DOCKER_MEM:-3500M}"

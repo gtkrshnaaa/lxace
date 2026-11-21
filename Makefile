@@ -3,10 +3,11 @@
 BUILD_DIR ?= build
 export CXX ?= g++
 
-# 50% Host resource caps
+# 50% Host resource caps, derived rather than hardcoded so the policy holds on any host.
 HOST_CPUS ?= $(shell nproc 2>/dev/null || echo 2)
 DOCKER_CPUS ?= $(shell echo $$(( ($(HOST_CPUS) + 1) / 2 )))
-DOCKER_MEM ?= 3500M
+HOST_MEM_MB ?= $(shell awk '/MemTotal/ {print int($$2 / 1024)}' /proc/meminfo 2>/dev/null || echo 4096)
+DOCKER_MEM ?= $(shell echo $$(( ($(HOST_MEM_MB) / 2) ))M)
 
 all: build
 
@@ -36,7 +37,7 @@ docker-run: docker-build
 		--name lxace-engine-runtime \
 		--cpus $(DOCKER_CPUS) \
 		--memory $(DOCKER_MEM) \
-		-p 8080:8080 \
+		-p 127.0.0.1:8080:8080 \
 		-v $$(pwd):/workspace \
 		lxace-engine:latest
 

@@ -5,9 +5,9 @@
 > All developers, CI/CD pipelines, and runtime orchestration bundles must strictly enforce the 50% maximum host resource policy:
 > 1. **Strict 50% CPU and RAM Cap**: Total container resource allocations across CPU cores and system memory must never exceed 50% of the host machine's total capacity (for example, maximum 4.0 CPUs and 3500M RAM on an 8-core / 7GB workstation). This preserves host OS responsiveness, battery longevity, and thermal headroom.
 > 2. **Containerized Execution**: All persistent runtimes, background sub-agent processes, web servers, and compilation pipelines must execute inside isolated, unprivileged Docker containers (`USER appuser`).
-> 3. **Native Runtime Metrics**: The engine dynamically probes `/proc/cpuinfo` and `/proc/meminfo` via `ProcfsReader::get_50_percent_cpu_cap()` and `ProcfsReader::get_50_percent_memory_cap()`, exposing active thresholds in `GET /api/session`.
+> 3. **Native Runtime Metrics**: The engine probes the online CPU count via `sysconf(_SC_NPROCESSORS_ONLN)` and reads `/proc/meminfo`, exposing the derived thresholds through `ProcfsReader::get_50_percent_cpu_cap()` and `ProcfsReader::get_50_percent_memory_cap()` in `GET /api/session`.
 
-LXACE is a self-contained, high-performance C++ control engine built exclusively for Linux environments. It provides native control over the underlying operating system through direct POSIX system calls and standard library abstractions rather than relying on bash subshells. 
+LXACE is a self-contained, high-performance C++ control engine built exclusively for Linux environments. It provides native control over the underlying operating system through direct POSIX system calls and standard library abstractions, with a single deliberate exception: command execution runs through `/bin/sh -c` so shell syntax behaves as operators expect, while every child inherits resource caps (`setrlimit`), its own process group, and an enforced timeout.
 
 The engine exposes a REST and Server-Sent Events (SSE) API surface for external wrappers (desktop environments, web applications, and external CLIs) while concurrently running an adaptive, menu-driven terminal interface.
 
