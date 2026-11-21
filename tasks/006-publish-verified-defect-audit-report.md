@@ -2,7 +2,7 @@
 id: "006"
 title: "Publish verified defect audit report with severity triage and remediation order"
 type: "docs"
-status: "in-progress"
+status: "done"
 created_at: "2026-11-17"
 updated_at: "2026-11-17"
 ---
