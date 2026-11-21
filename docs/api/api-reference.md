@@ -93,7 +93,6 @@ None.
 {
   "project_dir": "/home/user/space/project/my-app",
   "model": "claude-sonnet-4",
-  "base_url": "https://api.anthropic.com",
   "base_url_masked": "https://api.anthropic.com",
   "api_key_masked": "sk-ant-****************************************",
   "resource_limits": {
@@ -116,8 +115,8 @@ None.
 #### Field Details
 - `project_dir` (string): Absolute path to the sandboxed project root.
 - `model` (string): Configured LLM identifier.
-- `base_url` (string): Target API endpoint URL.
-- `base_url_masked` (string): Masked version of the base URL for safe UI rendering.
+- `base_url_masked` (string): Masked version of the base URL. Responses never include the
+  raw `base_url`, so an embedded credential cannot leak through the API.
 - `api_key_masked` (string): Masked token displaying prefix and concealing secrets with asterisks.
 - `resource_limits` (object): System resource ceiling enforced by LXACE runtime:
   - `host_cpu_cores` (integer): Total detected logical CPU cores on host OS.
@@ -294,7 +293,6 @@ Host: 127.0.0.1:8080
 #### Response (`200 OK`)
 ```json
 {
-  "base_url": "https://api.anthropic.com",
   "base_url_masked": "https://api.anthropic.com",
   "api_key_masked": "sk-ant-****************************************",
   "model": "claude-sonnet-4",
