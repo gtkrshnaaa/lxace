@@ -53,54 +53,88 @@ void SubAgent::emit_command(const std::string& command) {
     event_bus_->publish(ev);
 }
 
-void SubAgent::execute_task(Task& task, const std::atomic<bool>& cancel_flag) {
+void SubAgent::execute_task(Task& task, const std::atomic<bool>& cancel_token) {
     task.state = TaskState::Running;
     emit_action("Analyzing prompt: " + task.prompt);
 
-    if (cancel_flag) {
+    if (cancel_token) {
         task.state = TaskState::Cancelled;
         return;
     }
 
-    if (tool_registry_) {
-        tool::ToolExecutionContext ctx{project_dir_, event_bus_};
-        auto metrics_res = tool_registry_->execute("sys_metrics", {}, ctx);
-        if (metrics_res.success && metrics_res.data.is_object()) {
-            double cpus = metrics_res.data["cpu_50_percent_cap"].as_double();
-            emit_insight("Operating under 50% CPU allocation cap: " + std::to_string(static_cast<int>(cpus)) + " cores.");
-        }
-
-        if (cancel_flag) {
+    if (!tool_registry_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (cancel_token) {
             task.state = TaskState::Cancelled;
             return;
         }
-
-        std::string lower_prompt = task.prompt;
-        for (char& c : lower_prompt) {
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        }
-
-        if (lower_prompt.find("find") != std::string::npos || lower_prompt.find("files") != std::string::npos) {
-            json::JsonObject find_args;
-            find_args["max_results"] = json::JsonValue(10);
-            auto find_res = tool_registry_->execute("fs_find", find_args, ctx);
-            if (find_res.success) {
-                emit_action("Located workspace files via native fs_find.");
-            }
-        } else if (lower_prompt.find("search") != std::string::npos || lower_prompt.find("grep") != std::string::npos) {
-            json::JsonObject grep_args;
-            grep_args["query"] = json::JsonValue("Engine");
-            grep_args["max_matches"] = json::JsonValue(5);
-            auto grep_res = tool_registry_->execute("fs_grep", grep_args, ctx);
-            if (grep_res.success) {
-                emit_action("Scanned workspace patterns via native fs_grep.");
-            }
-        }
-    } else {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        emit_message("No tool registry attached; task had no executable work.");
+        task.result_summary = "No tool registry attached";
+        task.state = TaskState::Failed;
+        task.finished_at = std::chrono::system_clock::now();
+        return;
     }
 
-    if (cancel_flag) {
+    tool::ToolExecutionContext ctx{project_dir_, event_bus_};
+
+    auto metrics_res = tool_registry_->execute("sys_metrics", {}, ctx);
+    if (!metrics_res.success) {
+        emit_insight("sys_metrics unavailable: " + metrics_res.error);
+        task.state = TaskState::Failed;
+        task.result_summary = "sys_metrics failed: " + metrics_res.error;
+        task.finished_at = std::chrono::system_clock::now();
+        return;
+    }
+    if (metrics_res.data.is_object()) {
+        const double cpus = metrics_res.data["cpu_50_percent_cap"].as_double();
+        emit_insight("Operating under 50% CPU allocation cap: " + std::to_string(static_cast<int>(cpus)) + " cores.");
+    }
+
+    if (cancel_token) {
+        task.state = TaskState::Cancelled;
+        return;
+    }
+
+    std::string lower_prompt = task.prompt;
+    for (char& c : lower_prompt) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+
+    // Dispatch on the prompt intent. The grep query is derived from the prompt instead of
+    // a hardcoded literal, so the branch performs a real search for what was asked.
+    if (lower_prompt.find("find") != std::string::npos || lower_prompt.find("files") != std::string::npos) {
+        json::JsonObject find_args;
+        find_args["max_results"] = json::JsonValue(10);
+        if (lower_prompt.find("*.cpp") != std::string::npos) {
+            find_args["pattern"] = json::JsonValue("*.cpp");
+        }
+        auto find_res = tool_registry_->execute("fs_find", find_args, ctx);
+        if (!find_res.success) {
+            task.state = TaskState::Failed;
+            task.result_summary = "fs_find failed: " + find_res.error;
+            task.finished_at = std::chrono::system_clock::now();
+            return;
+        }
+        emit_action("Located workspace files via native fs_find.");
+        task.result_summary = "fs_find completed";
+    } else if (lower_prompt.find("search") != std::string::npos || lower_prompt.find("grep") != std::string::npos) {
+        json::JsonObject grep_args;
+        grep_args["query"] = json::JsonValue(task.prompt);
+        grep_args["max_matches"] = json::JsonValue(5);
+        auto grep_res = tool_registry_->execute("fs_grep", grep_args, ctx);
+        if (!grep_res.success) {
+            task.state = TaskState::Failed;
+            task.result_summary = "fs_grep failed: " + grep_res.error;
+            task.finished_at = std::chrono::system_clock::now();
+            return;
+        }
+        emit_action("Scanned workspace patterns via native fs_grep.");
+        task.result_summary = "fs_grep completed";
+    } else {
+        task.result_summary = "sys_metrics completed";
+    }
+
+    if (cancel_token) {
         task.state = TaskState::Cancelled;
         return;
     }

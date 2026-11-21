@@ -79,6 +79,7 @@ set(TEST_SOURCES
     tests/test_cli.cpp
     tests/test_tools.cpp
     tests/test_security.cpp
+    tests/test_agent.cpp
 )
 
 add_executable(lxace_tests

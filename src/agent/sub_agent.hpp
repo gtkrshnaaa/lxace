@@ -28,7 +28,11 @@ public:
     void emit_message(const std::string& text, const std::string& details = "");
     void emit_command(const std::string& command);
 
-    void execute_task(Task& task, const std::atomic<bool>& cancel_flag);
+    // Executes the task and records the terminal state on `task` (Succeeded, Failed, or
+    // Cancelled). State is the single source of truth, so callers never have to reconcile
+    // a separate boolean with it. cancel_token is per task, so cancelling one task never
+    // clears another task's signal.
+    void execute_task(Task& task, const std::atomic<bool>& cancel_token);
 
 private:
     std::string name_;

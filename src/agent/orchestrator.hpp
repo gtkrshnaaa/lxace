@@ -4,6 +4,7 @@
 #include "agent/sub_agent.hpp"
 #include "core/event_bus.hpp"
 #include <vector>
+#include <deque>
 #include <mutex>
 #include <memory>
 #include <thread>
@@ -35,7 +36,11 @@ public:
 private:
     struct WorkerHandle {
         std::thread thread;
+        std::string task_id;
         std::shared_ptr<std::atomic<bool>> done{std::make_shared<std::atomic<bool>>(false)};
+        // Per-task cancellation token. A shared reset flag meant submitting a new prompt
+        // silently resurrected every task that stop_all() had cancelled.
+        std::shared_ptr<std::atomic<bool>> cancel{std::make_shared<std::atomic<bool>>(false)};
     };
 
     void reap_finished_workers_locked();
@@ -44,8 +49,7 @@ private:
     std::shared_ptr<tool::ToolRegistry> tool_registry_;
     std::filesystem::path project_dir_;
     mutable std::mutex mutex_;
-    std::vector<Task> tasks_;
-    std::atomic<bool> cancel_flag_{false};
+    std::deque<std::shared_ptr<Task>> tasks_;
     std::vector<std::unique_ptr<WorkerHandle>> workers_;
     size_t next_task_id_{1};
     static constexpr size_t MAX_TASK_HISTORY = 100;

@@ -1,5 +1,6 @@
 #include "core/event_bus.hpp"
 #include <algorithm>
+#include <exception>
 
 namespace lxace::core {
 
@@ -28,8 +29,17 @@ void EventBus::publish(const Event& event) {
         }
     }
     for (const auto& cb : callbacks) {
-        if (cb) {
+        if (!cb) {
+            continue;
+        }
+        // A throwing listener previously escaped publish() and terminated the publishing
+        // thread. Listeners are now isolated so one bad subscriber cannot kill the server.
+        try {
             cb(event);
+        } catch (const std::exception&) {
+            continue;
+        } catch (...) {
+            continue;
         }
     }
 }
