@@ -354,6 +354,25 @@ void Engine::register_api_routes() {
             args_obj = (*parsed)["arguments"].as_object();
         }
 
+        // Mutating and destructive tools require an explicit confirmation flag. Without
+        // this gate any caller could rewrite files or spawn commands with a single
+        // unauthenticated-shaped request, and the declared risk level was never enforced.
+        auto tool = tool_registry_->get_tool(tool_name);
+        if (!tool) {
+            return net::HttpResponse::json(404, "{\"error\": \"Tool not found\"}");
+        }
+        const auto risk = tool->definition().risk_level;
+        if (risk != tool::ToolRiskLevel::ReadOnly) {
+            const bool confirmed = parsed->contains("confirm") && (*parsed)["confirm"].as_bool(false);
+            if (!confirmed) {
+                json::JsonObject err;
+                err["error"] = "Confirmation required";
+                err["risk_level"] = tool::tool_risk_to_string(risk);
+                err["hint"] = "Resend with \"confirm\": true to execute this tool";
+                return net::HttpResponse::json(428, json::JsonValue(err).serialize());
+            }
+        }
+
         tool::ToolExecutionContext ctx{project_dir_, event_bus_};
         auto result = tool_registry_->execute(tool_name, args_obj, ctx);
         return net::HttpResponse::json(200, json::JsonValue(result.to_json()).serialize());

@@ -1,4 +1,5 @@
 #include "tool/tool_fs_find.hpp"
+#include "tool/tool_fs_ignore.hpp"
 #include "sys/fs.hpp"
 #include <filesystem>
 #include <algorithm>
@@ -26,8 +27,7 @@ bool matches_pattern(const std::string& name, const std::string& pattern) {
 }
 
 bool is_ignored_dir(const std::string& dirname) {
-    return dirname == ".git" || dirname == "build" || dirname == ".aicodeeditor_context_archive" ||
-           dirname == ".aicodeeditor_context_window";
+    return is_ignored_directory(dirname);
 }
 
 } // namespace
@@ -92,8 +92,11 @@ ToolResult ToolFsFind::execute(const json::JsonObject& args, const ToolExecution
     bool truncated = false;
 
     auto options = std::filesystem::directory_options::skip_permission_denied;
+    // The condition must not test `ec`: it is set on a failed increment, and testing it
+    // aborted the entire traversal on the first unreadable directory. Recovery happens in
+    // the body, which clears the code and keeps iterating.
     for (std::filesystem::recursive_directory_iterator it(*safe_path, options, ec), end;
-         it != end && !ec; it.increment(ec)) {
+         it != end; it.increment(ec)) {
         if (ec) {
             ec.clear();
             continue;

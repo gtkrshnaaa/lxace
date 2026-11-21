@@ -1,4 +1,5 @@
 #include "tool/tool_fs_grep.hpp"
+#include "tool/tool_fs_ignore.hpp"
 #include "sys/fs.hpp"
 #include <filesystem>
 #include <fstream>
@@ -107,8 +108,10 @@ ToolResult ToolFsGrep::execute(const json::JsonObject& args, const ToolExecution
     bool truncated = false;
 
     auto options = std::filesystem::directory_options::skip_permission_denied;
+    // Testing `ec` in the loop condition aborted the whole scan on the first unreadable
+    // path, which made skip_permission_denied useless. Recovery is handled in the body.
     for (std::filesystem::recursive_directory_iterator it(*safe_path, options, ec), end;
-         it != end && !ec && !truncated; it.increment(ec)) {
+         it != end && !truncated; it.increment(ec)) {
         if (ec) {
             ec.clear();
             continue;
@@ -118,9 +121,7 @@ ToolResult ToolFsGrep::execute(const json::JsonObject& args, const ToolExecution
         std::string filename = entry.path().filename().string();
 
         if (entry.is_directory(ec)) {
-            if (filename == ".git" || filename == "build" ||
-                filename == ".aicodeeditor_context_archive" ||
-                filename == ".aicodeeditor_context_window") {
+            if (is_ignored_directory(filename)) {
                 it.disable_recursion_pending();
             }
             continue;

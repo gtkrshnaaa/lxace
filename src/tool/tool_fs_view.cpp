@@ -1,10 +1,19 @@
 #include "tool/tool_fs_view.hpp"
 #include "sys/fs.hpp"
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 
 namespace lxace::tool {
+
+namespace {
+
+// Hard ceiling for a single view response. Without it a caller could request an
+// effectively unlimited window and force the server to buffer an entire large file.
+constexpr int64_t kMaxViewBytes = 4 * 1024 * 1024;
+
+} // namespace
 
 ToolDefinition ToolFsView::definition() const {
     ToolDefinition def;
@@ -71,9 +80,11 @@ ToolResult ToolFsView::execute(const json::JsonObject& args, const ToolExecution
         end_line = std::max<int64_t>(start_line, it->second.as_int(end_line));
     }
 
+    // Clamp from both sides. The floor alone let a caller ask for an arbitrarily large
+    // window and pull an entire file into memory in one response.
     int64_t max_bytes = 65536;
     if (auto it = args.find("max_bytes"); it != args.end()) {
-        max_bytes = std::max<int64_t>(1024, it->second.as_int(65536));
+        max_bytes = std::clamp<int64_t>(it->second.as_int(65536), 1024, kMaxViewBytes);
     }
 
     std::ifstream file(*safe_path);
