@@ -27,7 +27,19 @@ std::optional<ProcessMetrics> ProcfsReader::get_process_metrics(pid_t pid) {
     unsigned int flags;
     uint64_t minflt, cminflt, majflt, cmajflt;
 
-    file >> metrics.pid >> comm >> metrics.state
+    // The comm field is parenthesized and may contain spaces, for example "(Web Content)".
+    // Stream extraction on `>> comm` split that name and shifted every later field, which
+    // produced a wrong RSS. Parse pid, then consume the balanced parentheses verbatim.
+    file >> metrics.pid;
+    file >> std::ws;
+    if (file.peek() != '(') {
+        return std::nullopt;
+    }
+    if (!std::getline(file, comm, ')')) {
+        return std::nullopt;
+    }
+    metrics.state.clear();
+    file >> metrics.state
          >> ppid >> pgrp >> session >> tty_nr >> tpgid
          >> flags >> minflt >> cminflt >> majflt >> cmajflt
          >> metrics.user_time_ticks >> metrics.kernel_time_ticks;
@@ -93,8 +105,10 @@ uint32_t ProcfsReader::get_cpu_cores() {
 }
 
 uint32_t ProcfsReader::get_50_percent_cpu_cap() {
-    uint32_t cores = get_cpu_cores();
-    return std::max<uint32_t>(1, cores / 2);
+    const uint32_t cores = get_cpu_cores();
+    // Round up so a 3-core host yields 2, matching the shell-side calculation in the
+    // Makefile. Floor division made the C++ and shell caps disagree on odd core counts.
+    return std::max<uint32_t>(1, (cores + 1) / 2);
 }
 
 uint64_t ProcfsReader::get_50_percent_memory_cap() {

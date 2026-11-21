@@ -11,7 +11,9 @@
 namespace lxace::sys {
 
 bool NetworkUtils::is_port_in_use(uint16_t port) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    // SOCK_CLOEXEC keeps the probe descriptor from leaking into child processes spawned by
+    // ProcessRunner, where it merely held a port open.
+    int sock = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (sock < 0) return true;
 
     struct sockaddr_in addr{};
@@ -37,7 +39,7 @@ bool NetworkUtils::check_tcp_connection(const std::string& host, uint16_t port, 
         return false;
     }
 
-    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int sock = socket(res->ai_family, res->ai_socktype | SOCK_CLOEXEC, res->ai_protocol);
     if (sock < 0) {
         freeaddrinfo(res);
         return false;

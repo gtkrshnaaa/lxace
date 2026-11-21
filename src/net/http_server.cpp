@@ -115,10 +115,21 @@ void HttpServer::worker_loop() {
 
 void HttpServer::server_loop() {
     std::vector<epoll_event> events;
+    auto last_reap = std::chrono::steady_clock::now();
 
     while (running_) {
         int nfds = reactor_->wait(events, std::chrono::milliseconds(100));
-        if (nfds <= 0) continue;
+        if (nfds < 0) continue;
+
+        // Reclaim hung-up SSE subscribers on a slow timer. broadcast() only reaps on a
+        // failed send, so an idle stream kept closed descriptors until the next event.
+        const auto now = std::chrono::steady_clock::now();
+        if (sse_manager_ && now - last_reap >= std::chrono::milliseconds(1000)) {
+            sse_manager_->reap_disconnected();
+            last_reap = now;
+        }
+
+        if (nfds == 0) continue;
 
         for (const auto& ev : events) {
             if (ev.data.fd == server_socket_.fd()) {
@@ -162,6 +173,30 @@ void HttpServer::handle_client(int client_fd) {
     }
 
     if (req->path == "/api/events" && req->method == HttpMethod::Get) {
+        // The SSE endpoint is dispatched before the router, so it must repeat the auth
+        // gate. Otherwise it was the one unauthenticated path into the event stream.
+        if (router_) {
+            const auto& policy = router_->auth_policy();
+            int auth_status = 200;
+            if (policy.require_token && !HttpAuth::authorize(*req, policy, auth_status)) {
+                HttpResponse denied = HttpResponse::json(auth_status, "{\"error\": \"Unauthorized\"}");
+                denied.headers["WWW-Authenticate"] = "Bearer realm=\"lxace\"";
+                HttpAuth::apply_cors(*req, policy, denied);
+                const std::string res_str = denied.to_http_string();
+                send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+                close(client_fd);
+                return;
+            }
+            // Preflight for the stream must pass the same origin allowlist.
+            const std::string origin = req->get_header("Origin");
+            if (!origin.empty() && !policy.allows_origin(origin)) {
+                const auto forbidden = HttpResponse::json(403, "{\"error\": \"Origin not allowed\"}");
+                const std::string res_str = forbidden.to_http_string();
+                send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+                close(client_fd);
+                return;
+            }
+        }
         // Hand off client to SSE manager (does not close fd)
         if (sse_manager_) {
             sse_manager_->add_client(client_fd);

@@ -60,12 +60,8 @@ ViewState ViewSettings::handle_input(core::Engine&) {
         case 'M':
             return ViewState::SettingsModel;
         case '4':
-        case 't':
-        case 'T':
             return ViewState::SettingsMaxTokens;
         case '5':
-        case 'e':
-        case 'E':
             return ViewState::SettingsTemperature;
         case '6':
         case 'b':
@@ -90,7 +86,11 @@ void ViewSettings::render_base_url(const core::Engine& engine) {
 }
 
 ViewState ViewSettings::handle_base_url(core::Engine& engine) {
-    std::string input = Terminal::read_masked_line('*');
+    // A base URL is not a secret, so it is echoed while typing to expose typos. Masking it
+    // hid exactly the mistakes the operator needed to see.
+    std::cout << "\n  URL: " << std::flush;
+    std::string input;
+    std::getline(std::cin, input);
     if (!input.empty()) {
         engine.config()->set_base_url(input);
         set_notification(UiNotification::Type::Success, "Base URL updated successfully");
