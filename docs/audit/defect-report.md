@@ -37,6 +37,32 @@ validate correctness.
 
 **Totals: 37 findings, of which 5 Critical, 16 High, 14 Medium, 2 Low or Drift.**
 
+### 1.3 Remediation Status
+
+All 37 findings were remediated in task `007`, across four commits plus one follow-up, each
+verified by a green test run. This snapshot records the state after remediation:
+
+| Field | Value |
+| --- | --- |
+| Findings remediated | 37 of 37 |
+| Test suite after remediation | `./build/lxace_tests`, 47 passed, 0 failed |
+| Security regression tests added | 17 |
+| Build after remediation | zero warnings under the same strict flag set |
+
+Two findings were partly remediated and are called out honestly rather than claimed closed:
+
+- `LX-003` applies `setrlimit` in the child and now also supports an explicit
+  `drop_uid`/`drop_gid` privilege drop. The drop is opt-in and inert by default, because an
+  engine that runs unprivileged has no lower identity to assume. Deployments running the
+  engine as root must set it.
+- `LX-018` is closed by decision rather than by implementation. The document set now states
+  that no LLM transport exists and that keyword dispatch is the intended behavior of this
+  release, instead of claiming inference that was never built.
+
+One finding was discovered during remediation and fixed with the rest: `/api/events`
+bypassed the router on its own fast path and stayed unauthenticated after the bearer gate
+landed. It is recorded here so the inventory stays complete at 38 defects total.
+
 ---
 
 ## 2. Index

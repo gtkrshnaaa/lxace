@@ -811,6 +811,35 @@ API keys and authentication credentials are treated as sensitive data:
 - Base URLs containing embedded tokens are scrubbed before serialization.
 - Engine logs and SSE telemetry never broadcast raw API tokens.
 
+### 5.4 Bearer Authentication
+Every endpoint except `GET /api/health` requires a bearer token:
+- The token is a 256-bit value generated from `getrandom` on first start and persisted in
+  `.lxace/auth_token` with `0600` permissions.
+- Clients send `Authorization: Bearer <token>`. Comparison is constant time and
+  length-safe, so a wrong token cannot be recovered through timing measurements.
+- A missing or invalid token yields `401 Unauthorized` with a `WWW-Authenticate` header
+  before any route handler executes. The SSE stream at `/api/events` enforces the same
+  gate on its own fast path.
+- The token is printed once to stdout at startup so an operator can capture it.
+
+### 5.5 Network Exposure
+- The server binds `127.0.0.1` by default. Remote binding requires an explicit
+  `LXACE_BIND` environment value, so an unconfigured engine is never reachable from the
+  network.
+- CORS is denied by default. Cross-origin requests are permitted only for origins listed
+  in `LXACE_ALLOWED_ORIGINS`, and `Access-Control-Allow-Origin` never emits a wildcard.
+  A preflight from an unlisted origin is rejected rather than accepted.
+
+### 5.6 Child Process Limits
+`ResourceLimits` is applied inside the forked child before `exec`:
+- `RLIMIT_AS`, `RLIMIT_NOFILE`, `RLIMIT_CPU`, `RLIMIT_FSIZE`, and `RLIMIT_CORE`.
+- `RLIMIT_NPROC` is applied as headroom below the inherited soft limit. An absolute
+  ceiling would fail every fork on a busy desktop because the limit counts all tasks
+  owned by the uid, threads included.
+- `drop_uid` and `drop_gid` optionally drop the child to an unprivileged identity. When
+  the drop is requested but not permitted, the child refuses to exec with exit code 126
+  instead of continuing with elevated privileges.
+
 ---
 
 ## 6. End-to-End Client Integration Examples
@@ -873,3 +902,62 @@ async function runClient() {
 
 runClient().catch(console.error);
 ```
+
+---
+
+## 7. Agent Runtime Behavior
+
+This section records what the orchestrator actually does today. Earlier revisions of this
+document described LLM-backed inference that the code never implemented. That gap is
+resolved here as an explicit scope decision rather than left as an undocumented claim.
+
+### 7.1 Transport Decision
+
+The engine ships **no outbound LLM transport**. There is no TLS client, no HTTP client, and
+no provider SDK in `src/agent`. The `base_url`, `api_key`, `model`, `max_tokens`, and
+`temperature` values are configuration surface only:
+
+- They are validated, persisted, and echoed back through `/api/settings`.
+- `api_key` is masked in every response and never logged or broadcast.
+- None of them is used to contact a remote provider, because no such call path exists.
+
+Adding a real transport is a feature, not a defect fix, and is deliberately out of scope for
+the 37-finding remediation cycle.
+
+### 7.2 What a Sub-Agent Actually Does
+
+`SubAgent::execute_task` is a deterministic dispatcher over the prompt text. It lowercases
+the prompt, matches a small set of substrings (`find`, `files`, `search`, `grep`), and then
+runs the corresponding native tool through the same registry exposed at `/api/tools`.
+
+Consequences worth stating plainly:
+
+- Behavior is reproducible and auditable. The same prompt always yields the same tool call.
+- It is not reasoning. An unmatched prompt produces no tool call at all.
+- No network egress is required to run a task, so the engine works fully offline.
+
+### 7.3 Task State Semantics
+
+`TaskState` is derived from the real tool result, not assumed:
+
+| State | Condition |
+| --- | --- |
+| `Pending` | Accepted, not yet scheduled |
+| `Running` | Worker claimed the task |
+| `Succeeded` | Tool returned a successful envelope |
+| `Failed` | Tool returned an error envelope, or no tool matched |
+| `Cancelled` | Cancel token tripped before completion |
+
+`Failed` is reachable. It is not a decorative enum member.
+
+### 7.4 Cancellation
+
+Each task owns a shared cancellation token. `POST /api/stop` trips the token of every task
+in flight. Submitting a new prompt after a stop creates a fresh token, so previously
+cancelled work is never resurrected by later activity.
+
+### 7.5 Worker Lifetime
+
+The orchestrator holds tasks by stable identity, so history trimming cannot orphan a
+running worker. Trim removes completed history only; a task with a live worker stays
+reachable until that worker finishes.
