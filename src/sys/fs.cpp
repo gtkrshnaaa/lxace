@@ -154,6 +154,16 @@ bool FsEngine::set_permissions(const std::filesystem::path& path, uint32_t mode)
     return chmod(path.c_str(), static_cast<mode_t>(mode)) == 0;
 }
 
+bool FsEngine::set_owner(const std::filesystem::path& path, uint32_t uid, uint32_t gid, bool follow_symlinks) {
+    // An unprivileged process may only chown a file to ids it already owns, so callers must
+    // surface the failure instead of assuming success. lchown is used by default so a
+    // symlink cannot be used to retarget ownership of a file outside the workspace.
+    const int rc = follow_symlinks
+        ? ::chown(path.c_str(), static_cast<uid_t>(uid), static_cast<gid_t>(gid))
+        : ::lchown(path.c_str(), static_cast<uid_t>(uid), static_cast<gid_t>(gid));
+    return rc == 0;
+}
+
 std::optional<std::filesystem::path> FsEngine::resolve_safe_path(const std::filesystem::path& base_dir, const std::filesystem::path& target) {
     std::error_code ec;
     auto abs_base = std::filesystem::weakly_canonical(base_dir, ec);

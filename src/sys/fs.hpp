@@ -28,6 +28,7 @@ public:
     static bool create_directories(const std::filesystem::path& path);
     static std::optional<uint32_t> get_permissions(const std::filesystem::path& path);
     static bool set_permissions(const std::filesystem::path& path, uint32_t mode);
+    static bool set_owner(const std::filesystem::path& path, uint32_t uid, uint32_t gid, bool follow_symlinks = false);
     static std::optional<std::filesystem::path> resolve_safe_path(const std::filesystem::path& base_dir, const std::filesystem::path& target);
 };
 
