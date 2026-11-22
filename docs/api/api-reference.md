@@ -9,7 +9,9 @@ The engine runtime is implemented entirely in C++20 using POSIX system calls and
 ## 1. Protocol Architecture & Conventions
 
 ### 1.1 Base URL and Transport
-By default, the LXACE HTTP and SSE services bind to port `8080` on all available interfaces:
+By default, the LXACE HTTP and SSE services bind to port `8080` on loopback only. Binding to
+a non-loopback interface requires an explicit `LXACE_BIND` opt-in, because `/api/exec` runs
+shell commands under the engine's own credentials:
 
 ```text
 http://127.0.0.1:8080
@@ -25,13 +27,17 @@ The listen port can be customized via the `--port <number>` CLI flag or configur
 - **Socket Timeouts**: Socket read and write timeouts are configured to 5 seconds (`SO_RCVTIMEO` and `SO_SNDTIMEO`) to protect against slowloris attacks and socket exhaustion.
 
 ### 1.3 Cross-Origin Resource Sharing (CORS)
-All HTTP responses include universal CORS headers, allowing browser-based frontend wrappers to interact with the engine from any local origin:
+CORS is allowlist-based. A request is accepted only when its `Origin` matches the configured
+allowlist or is a loopback origin. Wildcard `Access-Control-Allow-Origin` is never emitted.
 
 ```http
-Access-Control-Allow-Origin: *
+Access-Control-Allow-Origin: https://app.example
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization
 ```
+
+A preflight from an unlisted origin is rejected with `403`, and any request without a valid
+bearer token is rejected with `401` before dispatch.
 
 ### 1.4 Content Types
 - Standard API endpoints: `Content-Type: application/json`
@@ -683,9 +689,84 @@ Host: 127.0.0.1:8080
       "type": "object",
       "properties": {}
     }
+  },
+  {
+    "name": "fs_mutate",
+    "description": "Mutate the project filesystem: remove, copy, mkdir, chmod, chown, or stat a path. Every path is resolved inside the project root and must not cross a symlink.",
+    "risk_level": "destructive",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation": { "type": "string", "enum": ["remove", "copy", "mkdir", "chmod", "chown", "stat"], "description": "Operation to perform" },
+        "path": { "type": "string", "description": "Target path relative to the project root" },
+        "destination": { "type": "string", "description": "Destination path for 'copy'" },
+        "mode": { "type": "integer", "description": "Octal permission mode for 'chmod' (0..4095)" },
+        "uid": { "type": "integer", "description": "Numeric owner uid for 'chown' (use -1 to leave unchanged)" },
+        "gid": { "type": "integer", "description": "Numeric group gid for 'chown' (use -1 to leave unchanged)" }
+      },
+      "required": ["operation", "path"]
+    }
+  },
+  {
+    "name": "fs_watch",
+    "description": "Observe a project directory for a bounded window and return the filesystem events collected.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Directory to watch, relative to the project root (default: root)" },
+        "timeout_ms": { "type": "integer", "description": "Observation window in milliseconds (default 2000, max 30000)" },
+        "max_events": { "type": "integer", "description": "Stop early after this many events (default 100, max 1000)" }
+      }
+    }
+  },
+  {
+    "name": "proc_list",
+    "description": "List live processes with state, resident memory, and virtual memory, ordered by resident memory descending.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "limit": { "type": "integer", "description": "Maximum rows to return (default 20, clamped to 1..500)" },
+        "pid": { "type": "integer", "description": "Optional single pid to inspect instead of a full listing" }
+      }
+    }
+  },
+  {
+    "name": "proc_signal",
+    "description": "Send an allowlisted signal to a process. Supported: SIGHUP, SIGINT, SIGTERM, SIGUSR1, SIGUSR2, SIGCONT, SIGSTOP. SIGKILL is intentionally not offered.",
+    "risk_level": "destructive",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "pid": { "type": "integer", "description": "Target process id (must be positive)" },
+        "signal": { "type": "string", "enum": ["SIGHUP", "SIGINT", "SIGTERM", "SIGUSR1", "SIGUSR2", "SIGCONT", "SIGSTOP"], "description": "Signal name from the allowlist" }
+      },
+      "required": ["pid", "signal"]
+    }
+  },
+  {
+    "name": "net_probe",
+    "description": "Probe network state: check whether a local port is bound, or test TCP reachability of a host and port with a bounded timeout.",
+    "risk_level": "read-only",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "operation": { "type": "string", "enum": ["port_in_use", "tcp_connect"], "description": "Probe to run" },
+        "port": { "type": "integer", "description": "Target port (1..65535)" },
+        "host": { "type": "string", "description": "Hostname or address for 'tcp_connect' (default 127.0.0.1)" },
+        "timeout_ms": { "type": "integer", "description": "Connect timeout in milliseconds (default 2000, max 10000)" }
+      },
+      "required": ["operation", "port"]
+    }
   }
 ]
 ```
+
+Argument validation is typed, not presence-only. A supplied argument whose JSON type does not
+match the declared `type`, or a string outside the declared `enum`, is rejected with a
+`422`-style tool failure naming the offending parameter, so an autonomous caller can correct
+the call instead of receiving a silently clamped result.
 
 #### Example Command
 ```bash
