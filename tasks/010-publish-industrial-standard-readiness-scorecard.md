@@ -2,7 +2,7 @@
 id: "010"
 title: "publish industrial standard readiness scorecard"
 type: "docs"
-status: "in-progress"
+status: "done"
 created_at: "2026-11-23"
 updated_at: "2026-11-23"
 ---
