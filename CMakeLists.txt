@@ -56,7 +56,12 @@ set(CORE_SOURCES
     src/tool/tool_fs_find.cpp
     src/tool/tool_fs_grep.cpp
     src/tool/tool_proc_execute.cpp
+    src/tool/tool_proc_list.cpp
+    src/tool/tool_proc_signal.cpp
     src/tool/tool_sys_metrics.cpp
+    src/tool/tool_fs_mutate.cpp
+    src/tool/tool_fs_watch.cpp
+    src/tool/tool_net_probe.cpp
 )
 
 # Main executable
@@ -81,6 +86,7 @@ set(TEST_SOURCES
     tests/test_tools.cpp
     tests/test_security.cpp
     tests/test_agent.cpp
+    tests/test_capability_tools.cpp
 )
 
 add_executable(lxace_tests

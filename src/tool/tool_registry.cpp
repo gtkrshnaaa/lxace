@@ -3,8 +3,13 @@
 #include "tool/tool_fs_replace.hpp"
 #include "tool/tool_fs_find.hpp"
 #include "tool/tool_fs_grep.hpp"
+#include "tool/tool_fs_mutate.hpp"
+#include "tool/tool_fs_watch.hpp"
 #include "tool/tool_proc_execute.hpp"
+#include "tool/tool_proc_list.hpp"
+#include "tool/tool_proc_signal.hpp"
 #include "tool/tool_sys_metrics.hpp"
+#include "tool/tool_net_probe.hpp"
 #include <chrono>
 
 namespace lxace::tool {
@@ -19,7 +24,12 @@ void ToolRegistry::register_default_tools() {
     register_tool(std::make_shared<ToolFsFind>());
     register_tool(std::make_shared<ToolFsGrep>());
     register_tool(std::make_shared<ToolProcExecute>());
+    register_tool(std::make_shared<ToolProcList>());
+    register_tool(std::make_shared<ToolProcSignal>());
     register_tool(std::make_shared<ToolSysMetrics>());
+    register_tool(std::make_shared<ToolFsMutate>());
+    register_tool(std::make_shared<ToolFsWatch>());
+    register_tool(std::make_shared<ToolNetProbe>());
 }
 
 void ToolRegistry::register_tool(std::shared_ptr<Tool> tool) {
@@ -76,6 +86,72 @@ std::string ToolRegistry::validate_arguments(
             }
         }
     }
+
+    auto props_it = def.parameter_schema.find("properties");
+    if (props_it == def.parameter_schema.end() || !props_it->second.is_object()) {
+        return "";
+    }
+
+    // Presence-only validation let malformed tool calls through, so an autonomous caller
+    // received a silently clamped result instead of an actionable correction. Each supplied
+    // argument is now checked against its declared type and enum before dispatch.
+    for (const auto& [key, value] : args) {
+        const auto& props = props_it->second.as_object();
+        auto prop_it = props.find(key);
+        if (prop_it == props.end() || !prop_it->second.is_object()) {
+            continue;
+        }
+        const auto& spec = prop_it->second.as_object();
+
+        auto type_it = spec.find("type");
+        if (type_it != spec.end() && type_it->second.is_string()) {
+            const std::string& expected = type_it->second.as_string();
+            bool type_ok = true;
+            if (expected == "string") {
+                type_ok = value.is_string();
+            } else if (expected == "integer") {
+                type_ok = value.is_number();
+                if (type_ok) {
+                    const double raw = value.as_double();
+                    type_ok = (raw == static_cast<double>(static_cast<int64_t>(raw)));
+                }
+            } else if (expected == "number") {
+                type_ok = value.is_number();
+            } else if (expected == "boolean") {
+                type_ok = value.is_bool();
+            } else if (expected == "array") {
+                type_ok = value.is_array();
+            } else if (expected == "object") {
+                type_ok = value.is_object();
+            }
+            if (!type_ok) {
+                return "Parameter '" + key + "' must be of type " + expected;
+            }
+        }
+
+        auto enum_it = spec.find("enum");
+        if (enum_it != spec.end() && enum_it->second.is_array() && value.is_string()) {
+            const std::string& actual = value.as_string();
+            bool matched = false;
+            std::string allowed;
+            for (const auto& option : enum_it->second.as_array()) {
+                if (!option.is_string()) {
+                    continue;
+                }
+                if (!allowed.empty()) {
+                    allowed += ", ";
+                }
+                allowed += option.as_string();
+                if (option.as_string() == actual) {
+                    matched = true;
+                }
+            }
+            if (!matched) {
+                return "Parameter '" + key + "' must be one of: " + allowed;
+            }
+        }
+    }
+
     return "";
 }
 
