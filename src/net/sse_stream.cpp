@@ -1,4 +1,5 @@
 #include "net/sse_stream.hpp"
+#include "net/socket_write.hpp"
 #include "json/json_value.hpp"
 #include <unistd.h>
 #include <sys/socket.h>
@@ -59,7 +60,7 @@ void SseStreamManager::add_client(int client_fd) {
         "\r\n"
         ": connected\n\n";
 
-    send(client_fd, initial_header.data(), initial_header.size(), MSG_NOSIGNAL);
+    send_all(client_fd, initial_header);
 }
 
 void SseStreamManager::remove_client(int client_fd) {

@@ -38,6 +38,7 @@ set(CORE_SOURCES
     src/net/http_auth.cpp
     src/net/auth_token.cpp
     src/net/request_reader.cpp
+    src/net/socket_write.cpp
     src/net/http_parser.cpp
     src/net/http_router.cpp
     src/net/sse_stream.cpp

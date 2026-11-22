@@ -1,6 +1,7 @@
 #include "net/http_server.hpp"
 #include "net/http_parser.hpp"
 #include "net/request_reader.hpp"
+#include "net/socket_write.hpp"
 #include <unistd.h>
 #include <sys/socket.h>
 #include <chrono>
@@ -166,8 +167,7 @@ void HttpServer::handle_client(int client_fd) {
     auto req = HttpParser::parse(raw_buffer);
     if (!req) {
         auto bad_req = HttpResponse::json(400, "{\"error\": \"Malformed HTTP request\"}");
-        std::string res_str = bad_req.to_http_string();
-        send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+        send_all(client_fd, bad_req.to_http_string());
         close(client_fd);
         return;
     }
@@ -182,8 +182,7 @@ void HttpServer::handle_client(int client_fd) {
                 HttpResponse denied = HttpResponse::json(auth_status, "{\"error\": \"Unauthorized\"}");
                 denied.headers["WWW-Authenticate"] = "Bearer realm=\"lxace\"";
                 HttpAuth::apply_cors(*req, policy, denied);
-                const std::string res_str = denied.to_http_string();
-                send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+                send_all(client_fd, denied.to_http_string());
                 close(client_fd);
                 return;
             }
@@ -191,8 +190,7 @@ void HttpServer::handle_client(int client_fd) {
             const std::string origin = req->get_header("Origin");
             if (!origin.empty() && !policy.allows_origin(origin)) {
                 const auto forbidden = HttpResponse::json(403, "{\"error\": \"Origin not allowed\"}");
-                const std::string res_str = forbidden.to_http_string();
-                send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+                send_all(client_fd, forbidden.to_http_string());
                 close(client_fd);
                 return;
             }
@@ -213,8 +211,7 @@ void HttpServer::handle_client(int client_fd) {
         res = HttpResponse::json(500, "{\"error\": \"No router configured\"}");
     }
 
-    std::string res_str = res.to_http_string();
-    send(client_fd, res_str.data(), res_str.size(), MSG_NOSIGNAL);
+    send_all(client_fd, res.to_http_string());
     close(client_fd);
 }
 
