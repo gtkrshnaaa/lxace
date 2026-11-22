@@ -54,6 +54,12 @@ body() {
     curl -sS -m 5 "$@"
 }
 
+# jq's `//` operator treats false as empty, so a boolean field must be stringified
+# explicitly. Using `.success // "missing"` reported every real false as "missing".
+success_flag() {
+    jq -r 'if has("success") then (.success | tostring) else "missing" end'
+}
+
 if [[ ! -x "${BIN}" ]]; then
     printf 'error: %s not found, run make build first\n' "${BIN}" >&2
     exit 1
@@ -139,7 +145,7 @@ check "path traversal rejected" "403" \
 check "readonly tool runs without confirm" "true" \
     "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
         -d '{"tool":"fs_view","arguments":{"path":"README.md","max_bytes":256}}' \
-        "${BASE}/api/tools/execute" | jq -r '.success // "missing"')"
+        "${BASE}/api/tools/execute" | success_flag)"
 check "mutating tool requires confirm" "428" \
     "$(status -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
         -d '{"tool":"proc_execute","arguments":{"command":"echo gated"}}' \
@@ -148,10 +154,71 @@ confirmed_raw="$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Ty
     -d '{"tool":"proc_execute","arguments":{"command":"echo confirmed"},"confirm":true}' \
     "${BASE}/api/tools/execute")"
 check "mutating tool runs with confirm" "true" \
-    "$(printf '%s' "${confirmed_raw}" | jq -r '.success // "missing"')" "${confirmed_raw}"
+    "$(printf '%s' "${confirmed_raw}" | success_flag)" "${confirmed_raw}"
 check "unknown tool returns 404" "404" \
     "$(status -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
         -d '{"tool":"no_such_tool","arguments":{}}' "${BASE}/api/tools/execute")"
+
+# Capability surface: the six tools that expose previously unreachable native modules
+tools_raw="$(body -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/tools")"
+check "capability fs_mutate registered" "destructive" \
+    "$(printf '%s' "${tools_raw}" | jq -r '[.[] | select(.name == "fs_mutate")] | .[0].risk_level // "missing"')" "${tools_raw}"
+check "capability proc_signal registered" "destructive" \
+    "$(printf '%s' "${tools_raw}" | jq -r '[.[] | select(.name == "proc_signal")] | .[0].risk_level // "missing"')" "${tools_raw}"
+check "capability net_probe registered" "read-only" \
+    "$(printf '%s' "${tools_raw}" | jq -r '[.[] | select(.name == "net_probe")] | .[0].risk_level // "missing"')" "${tools_raw}"
+check "capability fs_watch registered" "read-only" \
+    "$(printf '%s' "${tools_raw}" | jq -r '[.[] | select(.name == "fs_watch")] | .[0].risk_level // "missing"')" "${tools_raw}"
+check "capability proc_list registered" "read-only" \
+    "$(printf '%s' "${tools_raw}" | jq -r '[.[] | select(.name == "proc_list")] | .[0].risk_level // "missing"')" "${tools_raw}"
+
+# Destructive tools must require confirmation like the older mutating tools
+check "fs_mutate requires confirm" "428" \
+    "$(status -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"fs_mutate","arguments":{"operation":"stat","path":"README.md"}}' \
+        "${BASE}/api/tools/execute")"
+check "proc_signal requires confirm" "428" \
+    "$(status -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"proc_signal","arguments":{"pid":1,"signal":"SIGTERM"}}' \
+        "${BASE}/api/tools/execute")"
+
+# Read-only capability tools run without confirmation
+check "proc_list returns processes" "true" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"proc_list","arguments":{"limit":3}}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+check "net_probe reports a port" "true" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"net_probe","arguments":{"operation":"port_in_use","port":1}}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+check "net_probe rejects bad port via typed validation" "false" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"net_probe","arguments":{"operation":"port_in_use","port":70000}}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+check "fs_watch returns within its window" "true" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"fs_watch","arguments":{"timeout_ms":120}}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+
+# Typed validation must reject a wrong type before the tool body runs
+check "typed validation rejects wrong type" "false" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"net_probe","arguments":{"operation":"port_in_use","port":"eighty"}}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+
+# Confirmed fs_mutate round trip inside a temporary project-relative path
+check "fs_mutate mkdir with confirm" "true" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"fs_mutate","arguments":{"operation":"mkdir","path":"build/smoke-dir"},"confirm":true}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+check "fs_mutate remove with confirm" "true" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"fs_mutate","arguments":{"operation":"remove","path":"build/smoke-dir"},"confirm":true}' \
+        "${BASE}/api/tools/execute" | success_flag)"
+check "fs_mutate path escape rejected" "false" \
+    "$(body -X POST -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+        -d '{"tool":"fs_mutate","arguments":{"operation":"remove","path":"../../etc/passwd"},"confirm":true}' \
+        "${BASE}/api/tools/execute" | success_flag)"
 
 # Secret handling
 settings_raw="$(body -H "Authorization: Bearer ${TOKEN}" "${BASE}/api/settings")"
